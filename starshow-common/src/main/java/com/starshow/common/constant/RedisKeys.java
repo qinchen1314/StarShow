@@ -16,12 +16,20 @@ public final class RedisKeys {
         return "starshow:auth:blacklist:" + jti;
     }
 
+    public static String userVerified(long userId) {
+        return "starshow:user:verified:" + userId;
+    }
+
     public static String reservationBloom(long showId) {
         return "starshow:rsv:bloom:" + showId;
     }
 
     public static String reservationCount(long showId) {
         return "starshow:rsv:count:" + showId;
+    }
+
+    public static String reservationCountLock(long showId) {
+        return "starshow:lock:rsv_count:" + showId;
     }
 
     // ---------- 演出缓存与座位图（链路二） ----------

@@ -1,1 +1,3 @@
 com.starshow.common.config.JacksonLongToStringConfig
+com.starshow.common.config.StarShowCommonAutoConfiguration
+com.starshow.common.config.StarShowServletWebAutoConfiguration

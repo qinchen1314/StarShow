@@ -18,6 +18,10 @@ public enum ErrorCode {
     IDENTITY_REQUIRED("A0104", "请先完成实名认证后再参与预约或抢票"),
     IDENTITY_DUPLICATE("A0105", "该身份证已绑定其他账号，请勿重复注册"),
     RESERVATION_DUPLICATE("A0106", "您已预约过该场次"),
+    PHONE_ALREADY_EXISTS("A0107", "该手机号已注册"),
+    LOGIN_FAILED("A0108", "手机号或密码错误"),
+    ID_CARD_INVALID("A0109", "身份证号格式或校验码不合法"),
+    IDENTITY_ALREADY_VERIFIED("A0110", "当前账号已完成实名认证，请勿重复提交"),
 
     // 演出与余票 (A02xx)
     SHOW_NOT_FOUND("A0201", "演出场次不存在"),

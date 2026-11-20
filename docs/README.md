@@ -37,3 +37,9 @@
 1. **改码必同步（Docs-as-Code）**：凡涉及接口路径/字段变化、表结构变更、状态机变更、Lua 脚本变更，必须在同一 Commit 或同一 PR 内同步更新映射文档，并由 `prove-it` 验收门禁抽查。
 2. **新会话接续第一入口**：开启新窗口或隔天继续开发时，先读 [PROGRESS.md](./PROGRESS.md) 再读目标板块的 `docs/domains/0x-*.md`，10 秒恢复完整上下文。
 3. **只写事实与证据，不写空话**：文档中只保留已拍板契约、实测数据、明确 TODO 与已知限制；严禁编造未测指标，严禁混入真实密码、个人路径或个人邮箱。
+
+## 四、验收 Issue 与回执
+
+里程碑复核发现的缺口归档在 [docs/issues](./issues/)。进度与发布状态从 [PROGRESS.md](./PROGRESS.md) 进入。每条 Issue 记录 P 级、源码或实跑证据、影响与关闭断言，并关联原 Epic。链路一从 [ISSUE-001](./issues/ISSUE-001-chain1-user-reservation.md) 进入，最新实跑记录见 [终版复验回执](./issues/ISSUE-007-chain1-acceptance-evidence.md#2026-11-20-终版复验回执issue-008--issue-010-闭环)。
+
+[四条票务链路优化评审](./reviews/chain-optimization-review.md)记录预约、开售、下单、履约的交接建议，供各阶段的规格评审使用。

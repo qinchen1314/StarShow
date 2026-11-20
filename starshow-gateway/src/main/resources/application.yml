@@ -8,14 +8,15 @@ spring:
     redis:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:starshow_redis_pass}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
   cloud:
     gateway:
       routes:
         - id: starshow-user
           uri: ${USER_SERVICE_URI:http://127.0.0.1:8001}
           predicates:
-            - Path=/api/v1/users/**,/api/v1/auth/**,/api/v1/reservations/**
+            - Path=/api/v1/users/**,/api/v1/auth/**,/api/v1/reservations/**,/api/v1/notifications/**
         - id: starshow-show
           uri: ${SHOW_SERVICE_URI:http://127.0.0.1:8002}
           predicates:
@@ -34,3 +35,11 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+
+starshow:
+  security:
+    # 严禁回退公开默认值，必须通过环境变量注入
+    jwt-secret: ${STARSHOW_JWT_SECRET:}
+    jwt-expire-seconds: ${STARSHOW_JWT_EXPIRE_SECONDS:86400}
+    internal-gateway-secret: ${STARSHOW_INTERNAL_GATEWAY_SECRET:}
+    blacklist-timeout-ms: ${STARSHOW_BLACKLIST_TIMEOUT_MS:500}

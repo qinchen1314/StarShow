@@ -53,7 +53,7 @@ routes:
       - docs/domains/02-show-inventory.md
       - docs/contracts/API_CONTRACT.md
       - docs/PROGRESS.md
-    prove_it_level: L1 + L2(布隆拦截零穿透/逻辑过期单线程重建/Bitmap 10x10 矩阵)
+    prove_it_level: L1 + L2(布隆防穿透/热点单次重建/10x10 座位图/改期与预热竞态/缺键与售罄区分)
 
   chain3_order_seckill:
     title: 链路三 · V1→V4 抢票下单引擎、Lua 原子脚本与基因分表
@@ -77,7 +77,7 @@ routes:
       - docs/domains/03-order-seckill.md
       - docs/contracts/API_CONTRACT.md
       - docs/PROGRESS.md
-    prove_it_level: L1 + L2(200并发抢20张0超卖/连座冲突) + L3(事务回查补单与防悬挂墓碑)
+    prove_it_level: L1 + L2(200并发抢20张零超卖与重复单/连座冲突) + L3(首请找回/回查竞态/落库与回补决策)
 
   chain4_payment_reconcile:
     title: 链路四 · Mock 支付故障注入、关单竞速、出票、退款 Saga 与四方对账
@@ -98,7 +98,7 @@ routes:
       - docs/domains/04-payment-reconcile.md
       - docs/contracts/API_CONTRACT.md
       - docs/PROGRESS.md
-    prove_it_level: L1 + L3(六大魔鬼故障剧本全通过)
+    prove_it_level: L1 + L3(回调重放与丢失/关单后迟到支付/退款续跑/释放凭证/四方对账)
 
   infra_common_api:
     title: 公共底座、双形态启动、Docker 与契约调整

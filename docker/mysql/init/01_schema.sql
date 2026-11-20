@@ -44,37 +44,62 @@ CREATE TABLE IF NOT EXISTS `t_user_identity` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='实名认证表（一证一账号）';
 
 CREATE TABLE IF NOT EXISTS `t_reservation` (
-    `id`            BIGINT   NOT NULL COMMENT '预约ID(Snowflake)',
-    `user_id`       BIGINT   NOT NULL COMMENT '用户ID',
-    `show_id`       BIGINT   NOT NULL COMMENT '演出场次ID',
-    `remind_status` TINYINT  NOT NULL DEFAULT 0 COMMENT '提醒状态：0待发送 1已发送 2失败',
-    `deleted`       TINYINT  NOT NULL DEFAULT 0,
-    `create_time`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `update_time`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `id`                    BIGINT   NOT NULL COMMENT '预约ID(Snowflake)',
+    `user_id`               BIGINT   NOT NULL COMMENT '用户ID',
+    `show_id`               BIGINT   NOT NULL COMMENT '演出场次ID',
+    `remind_status`         TINYINT  NOT NULL DEFAULT 0 COMMENT '提醒状态：0待投递/超窗 1已送达(终态) 2失败/超时待重试 3已排期 4已开售/结束无需提醒',
+    `remind_config_version` INT      NOT NULL DEFAULT 1 COMMENT '关联的开售配置版本号（改期后按新版本重排）',
+    `next_retry_time`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次可调度/入窗时间（防超窗占满补偿批次）',
+    `deleted`               TINYINT  NOT NULL DEFAULT 0,
+    `create_time`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_show` (`user_id`, `show_id`),
-    KEY `idx_show_id` (`show_id`)
+    KEY `idx_show_id` (`show_id`),
+    KEY `idx_remind_retry` (`remind_status`, `next_retry_time`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='开票预约蓄水表';
+
+CREATE TABLE IF NOT EXISTS `t_user_notification` (
+    `id`                  BIGINT       NOT NULL COMMENT '通知ID(Snowflake)',
+    `user_id`             BIGINT       NOT NULL COMMENT '用户ID',
+    `show_id`             BIGINT       NOT NULL COMMENT '演出场次ID',
+    `reservation_id`      BIGINT       NOT NULL COMMENT '关联预约ID',
+    `sale_config_version` INT          NOT NULL DEFAULT 1 COMMENT '开售配置版本号',
+    `notification_type`   VARCHAR(32)  NOT NULL DEFAULT 'REMIND_BEFORE_SALE' COMMENT '通知类型：REMIND_BEFORE_SALE(开票提醒)/SCHEDULE_CHANGED(改期变更)',
+    `biz_key`             VARCHAR(96)  NOT NULL COMMENT '幂等业务键(rsv:<id>:v<ver> / resched:<id>:v<ver>)',
+    `title`               VARCHAR(128) NOT NULL COMMENT '站内通知标题',
+    `content`             VARCHAR(512) NOT NULL COMMENT '站内通知正文',
+    `action_url`          VARCHAR(128) NOT NULL DEFAULT '' COMMENT '购票入口跳转路径',
+    `read_flag`           TINYINT      NOT NULL DEFAULT 0 COMMENT '0未读 1已读',
+    `read_time`           DATETIME     NULL COMMENT '用户打开/已读时间',
+    `deleted`             TINYINT      NOT NULL DEFAULT 0,
+    `create_time`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_biz_key` (`biz_key`),
+    KEY `idx_user_create` (`user_id`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户站内通知表（开票提醒与改期变更落账）';
 
 -- ----------------------------------------------------------------------------
 -- 2. 演出、票档与座位域 (starshow-show)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `t_show` (
-    `id`              BIGINT        NOT NULL COMMENT '演出场次ID',
-    `title`           VARCHAR(128)  NOT NULL COMMENT '演出标题',
-    `artist`          VARCHAR(64)   NOT NULL DEFAULT '' COMMENT '艺人/主办方',
-    `city`            VARCHAR(32)   NOT NULL COMMENT '城市',
-    `venue`           VARCHAR(128)  NOT NULL COMMENT '场馆名称',
-    `show_time`       DATETIME      NOT NULL COMMENT '演出开演时间',
-    `sale_start_time` DATETIME      NOT NULL COMMENT '开票时间',
-    `sale_end_time`   DATETIME      NOT NULL COMMENT '停售时间',
-    `sale_status`     VARCHAR(20)   NOT NULL DEFAULT 'INIT' COMMENT 'INIT/PREHEATED/ON_SALE/SOLD_OUT/ENDED',
-    `seat_mode`       VARCHAR(20)   NOT NULL DEFAULT 'AUTO_ALLOC' COMMENT 'AUTO_ALLOC(自动配座)/MANUAL_SEAT(自主选座)',
-    `poster_url`      VARCHAR(256)  NOT NULL DEFAULT '' COMMENT '海报地址',
-    `description`     TEXT          NULL COMMENT '演出详情',
-    `deleted`         TINYINT       NOT NULL DEFAULT 0,
-    `create_time`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `update_time`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `id`                  BIGINT        NOT NULL COMMENT '演出场次ID',
+    `title`               VARCHAR(128)  NOT NULL COMMENT '演出标题',
+    `artist`              VARCHAR(64)   NOT NULL DEFAULT '' COMMENT '艺人/主办方',
+    `city`                VARCHAR(32)   NOT NULL COMMENT '城市',
+    `venue`               VARCHAR(128)  NOT NULL COMMENT '场馆名称',
+    `show_time`           DATETIME      NOT NULL COMMENT '演出开演时间',
+    `sale_start_time`     DATETIME      NOT NULL COMMENT '开票时间',
+    `sale_end_time`       DATETIME      NOT NULL COMMENT '停售时间',
+    `sale_status`         VARCHAR(20)   NOT NULL DEFAULT 'INIT' COMMENT 'INIT/PREHEATED/ON_SALE/SOLD_OUT/ENDED',
+    `sale_config_version` INT           NOT NULL DEFAULT 1 COMMENT '开售配置版本号（主办方改期+1，贯穿提醒与预热）',
+    `seat_mode`           VARCHAR(20)   NOT NULL DEFAULT 'AUTO_ALLOC' COMMENT 'AUTO_ALLOC(自动配座)/MANUAL_SEAT(自主选座)',
+    `poster_url`          VARCHAR(256)  NOT NULL DEFAULT '' COMMENT '海报地址',
+    `description`         TEXT          NULL COMMENT '演出详情',
+    `deleted`             TINYINT       NOT NULL DEFAULT 0,
+    `create_time`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     KEY `idx_sale_start` (`sale_start_time`, `sale_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='演出场次表';

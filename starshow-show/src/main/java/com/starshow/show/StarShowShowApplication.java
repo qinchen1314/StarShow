@@ -7,6 +7,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class StarShowShowApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(StarShowShowApplication.class, args);
+        SpringApplication app = new SpringApplication(StarShowShowApplication.class);
+        // 独立启动时自动加载 application-show.yml，避免与 starshow-boot-all 主 application.yml 冲突
+        app.setAdditionalProfiles("show");
+        app.run(args);
     }
 }

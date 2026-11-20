@@ -1,0 +1,65 @@
+server:
+  port: 8001
+
+spring:
+  application:
+    name: starshow-user
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:starshow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: pg-starshow-user
+
+starshow:
+  worker-id: ${STARSHOW_WORKER_ID:1}
+  services:
+    show-uri: ${SHOW_SERVICE_URI:http://127.0.0.1:8002}
+  feign:
+    connect-timeout-ms: ${STARSHOW_FEIGN_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${STARSHOW_FEIGN_READ_TIMEOUT_MS:3000}
+  security:
+    # 严禁回退公开默认值，必须通过环境变量注入
+    jwt-secret: ${STARSHOW_JWT_SECRET:}
+    jwt-expire-seconds: ${STARSHOW_JWT_EXPIRE_SECONDS:86400}
+    aes-key: ${STARSHOW_AES_KEY:}
+    idcard-pepper: ${STARSHOW_IDCARD_PEPPER:}
+    internal-gateway-secret: ${STARSHOW_INTERNAL_GATEWAY_SECRET:}
+  reservation:
+    remind-lead-seconds: ${STARSHOW_REMIND_LEAD_SECONDS:600}
+    remind-max-delay-seconds: ${STARSHOW_REMIND_MAX_DELAY_SECONDS:259200}
+    test-override-delay-ms: ${STARSHOW_TEST_OVERRIDE_DELAY_MS:0}
+    mq-enabled: ${STARSHOW_RESERVATION_MQ_ENABLED:true}
+    recovery-enabled: ${STARSHOW_REMIND_RECOVERY_ENABLED:true}
+    remind-recovery-interval-ms: ${STARSHOW_REMIND_RECOVERY_INTERVAL_MS:60000}
+    remind-retry-backoff-seconds: ${STARSHOW_REMIND_RETRY_BACKOFF_SECONDS:30}
+    remind-recovery-batch-size: ${STARSHOW_REMIND_RECOVERY_BATCH_SIZE:100}
+    remind-recovery-max-batches-per-run: ${STARSHOW_REMIND_RECOVERY_MAX_BATCHES:20}
+    count-cache-ttl-seconds: ${STARSHOW_COUNT_CACHE_TTL_SECONDS:30}
+    count-rebuild-lock-lease-seconds: ${STARSHOW_COUNT_REBUILD_LOCK_LEASE_SECONDS:10}
+    count-local-snapshot-ttl-ms: ${STARSHOW_COUNT_LOCAL_SNAPSHOT_TTL_MS:0}
+    count-max-stale-seconds: ${STARSHOW_COUNT_MAX_STALE_SECONDS:120}
+    remind-dispatch-jitter-seconds: ${STARSHOW_REMIND_DISPATCH_JITTER_SECONDS:0}
+
+mybatis-plus:
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
