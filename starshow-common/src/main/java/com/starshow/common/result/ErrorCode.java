@@ -28,6 +28,7 @@ public enum ErrorCode {
     SHOW_NOT_ON_SALE("A0202", "演出尚未开票或已停售"),
     TIER_NOT_FOUND("A0203", "票档不存在"),
     SEAT_CONFLICT("A0204", "所选座位已被占用，请重新选择"),
+    SHOW_CONFIG_VERSION_CHANGED("A0205", "开售配置或座位布局版本已变化，请刷新页面"),
 
     // 抢票与订单 (A03xx)
     STOCK_NOT_ENOUGH("A0301", "手慢了，该票档余票不足"),
@@ -43,10 +44,11 @@ public enum ErrorCode {
     PAYMENT_AMOUNT_MISMATCH("A0403", "支付回调金额与订单不一致"),
     REFUND_NOT_ALLOWED("A0404", "当前订单状态不允许退款"),
 
-    // 系统与限流 (B01xx)
+    // 系统与限流 (B01xx / B02xx)
     TOO_MANY_REQUESTS("B0101", "当前抢票人数过多，请稍后再试"),
     LOCK_ACQUIRE_FAILED("B0102", "系统繁忙，请稍后重试"),
     MQ_SEND_FAILED("B0103", "下单消息投递失败，请稍后重试"),
+    STOCK_UNAVAILABLE("B0201", "库存暂不可用，请稍后刷新"),
     SYSTEM_ERROR("B9999", "系统内部异常");
 
     private final String code;

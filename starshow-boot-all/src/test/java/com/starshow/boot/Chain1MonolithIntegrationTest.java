@@ -143,12 +143,29 @@ class Chain1MonolithIntegrationTest {
                     .map(f -> m == null ? null : m.get(String.valueOf(f)))
                     .toList();
         });
+        when(hashOps.entries(anyString())).thenAnswer(inv -> {
+            Map<String, String> m = redisHash.get(inv.getArgument(0));
+            return m == null ? Map.of() : new java.util.HashMap<Object, Object>(m);
+        });
         when(stringRedisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class))).thenAnswer(inv -> {
             RedisScript<?> script = inv.getArgument(0);
             String key = ((List<String>) inv.getArgument(1)).get(0);
-            Object[] args = inv.getArgument(2);
+            Object rawArg2 = inv.getRawArguments()[2];
+            Object[] args = rawArg2 instanceof Object[] arr ? arr : new Object[]{rawArg2};
             String lua = script.getScriptAsString();
             Map<String, String> h = redisHash.computeIfAbsent(key, k -> new ConcurrentHashMap<>());
+            if (lua.contains("stage', 'BLOCKED'")) {
+                h.put("version", String.valueOf(args[0]));
+                h.put("stage", "BLOCKED");
+                return 1L;
+            }
+            if (lua.contains("stage', 'INIT'")) {
+                h.put("version", String.valueOf(args[0]));
+                h.put("stage", "INIT");
+                h.put("saleStartEpochMs", String.valueOf(args[1]));
+                h.put("saleEndEpochMs", String.valueOf(args[2]));
+                return 1L;
+            }
             if (lua.contains("HINCRBY")) {
                 String expectedEpoch = String.valueOf(args[0]);
                 if (expectedEpoch.equals(h.get("epoch"))) {
@@ -335,7 +352,8 @@ class Chain1MonolithIntegrationTest {
                 "/api/v1/notifications/" + notifId + "/read", HttpMethod.POST, new HttpEntity<>(authAHeaders), String.class);
         assertTrue(objectMapper.readTree(readResp.getBody()).path("data").path("read").asBoolean());
 
-        // 8B. 主办方改期联动（v1 -> v2）+ 预约重排 + 验证 GET /me 显示新版本且旧版 v1 延迟消息被版本守卫跳过
+        // 8B. 主办方改期联动（v1 -> v2）：Phase 2 改期自动本地联动重排预约与落盘 SCHEDULE_CHANGED 通知；
+        //     二次调用 /internal/reservations/shows/10003/reschedule 幂等不重复发通知
         HttpHeaders internalHeaders = new HttpHeaders();
         internalHeaders.setContentType(MediaType.APPLICATION_JSON);
         internalHeaders.set(AuthHeaders.X_INTERNAL_GATEWAY_SECRET, "monolith-it-internal-5c4b3a2f1e");
@@ -350,6 +368,15 @@ class Chain1MonolithIntegrationTest {
         assertEquals(HttpStatus.OK, scheduleResp.getStatusCode());
         assertEquals(2, objectMapper.readTree(scheduleResp.getBody()).path("data").path("saleConfigVersion").asInt());
 
+        // 改期完成后用户无需额外手工触发即可立即收到 SCHEDULE_CHANGED 站内变更通知
+        ResponseEntity<String> notifAfterSchedule = restTemplate.exchange(
+                "/api/v1/notifications/me", HttpMethod.GET, new HttpEntity<>(authAHeaders), String.class);
+        JsonNode notifListAfter = objectMapper.readTree(notifAfterSchedule.getBody()).path("data");
+        assertEquals(2, notifListAfter.size());
+        assertEquals("SCHEDULE_CHANGED", notifListAfter.get(0).path("notificationType").asText());
+        assertEquals(2, notifListAfter.get(0).path("saleConfigVersion").asInt());
+
+        // 幂等重放 /internal/reservations/shows/10003/reschedule：版本已同步至 v2，不得重复重置或重复发通知
         ResponseEntity<String> rescheduleResp = restTemplate.exchange(
                 "/internal/reservations/shows/10003/reschedule",
                 HttpMethod.POST,
@@ -358,16 +385,13 @@ class Chain1MonolithIntegrationTest {
         );
         assertEquals(HttpStatus.OK, rescheduleResp.getStatusCode());
         JsonNode reschedData = objectMapper.readTree(rescheduleResp.getBody()).path("data");
-        assertEquals(1, reschedData.path("resetReservationCount").asInt());
-        assertEquals(1, reschedData.path("scheduleNotifiedCount").asInt());
+        assertEquals(2, reschedData.path("saleConfigVersion").asInt());
+        assertEquals(0, reschedData.path("resetReservationCount").asInt());
+        assertEquals(0, reschedData.path("scheduleNotifiedCount").asInt());
 
-        // 验证改期当下用户已立即收到 SCHEDULE_CHANGED 站内变更通知
-        ResponseEntity<String> notifAfterResched = restTemplate.exchange(
+        ResponseEntity<String> notifAfterReplay = restTemplate.exchange(
                 "/api/v1/notifications/me", HttpMethod.GET, new HttpEntity<>(authAHeaders), String.class);
-        JsonNode notifListAfter = objectMapper.readTree(notifAfterResched.getBody()).path("data");
-        assertEquals(2, notifListAfter.size());
-        assertEquals("SCHEDULE_CHANGED", notifListAfter.get(0).path("notificationType").asText());
-        assertEquals(2, notifListAfter.get(0).path("saleConfigVersion").asInt());
+        assertEquals(2, objectMapper.readTree(notifAfterReplay.getBody()).path("data").size());
 
         // 模拟旧版 v1 消息晚到 -> 必须被版本守卫丢弃，不把 v2 预约误标成已送达
         showRemindConsumer.onMessage(event);

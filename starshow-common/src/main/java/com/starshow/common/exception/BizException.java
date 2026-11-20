@@ -10,19 +10,33 @@ import lombok.Getter;
 public class BizException extends RuntimeException {
 
     private final ErrorCode errorCode;
+    private final Integer httpStatus;
+    private final Long retryAfterMs;
 
     public BizException(ErrorCode errorCode) {
-        super(errorCode.getMessage());
-        this.errorCode = errorCode;
+        this(errorCode, errorCode.getMessage(), null, null, null);
     }
 
     public BizException(ErrorCode errorCode, String detailMessage) {
-        super(detailMessage);
-        this.errorCode = errorCode;
+        this(errorCode, detailMessage, null, null, null);
     }
 
     public BizException(ErrorCode errorCode, String detailMessage, Throwable cause) {
+        this(errorCode, detailMessage, null, null, cause);
+    }
+
+    public BizException(ErrorCode errorCode, int httpStatus, Long retryAfterMs, String detailMessage) {
+        this(errorCode, detailMessage, httpStatus, retryAfterMs, null);
+    }
+
+    private BizException(ErrorCode errorCode, String detailMessage, Integer httpStatus, Long retryAfterMs, Throwable cause) {
         super(detailMessage, cause);
         this.errorCode = errorCode;
+        this.httpStatus = httpStatus;
+        this.retryAfterMs = retryAfterMs;
+    }
+
+    public static BizException serviceUnavailable(ErrorCode errorCode, long retryAfterMs, String detailMessage) {
+        return new BizException(errorCode, 503, retryAfterMs, detailMessage);
     }
 }

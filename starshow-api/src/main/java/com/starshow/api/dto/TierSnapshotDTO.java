@@ -26,4 +26,11 @@ public class TierSnapshotDTO implements Serializable {
     private String seatMode;
     private LocalDateTime saleStartTime;
     private LocalDateTime saleEndTime;
+    private Integer saleConfigVersion;
+    private Integer maxTicketsPerOrder;
+    private String layoutVersion;
+
+    public int effectiveSaleConfigVersion() {
+        return (saleConfigVersion == null || saleConfigVersion < 1) ? 1 : saleConfigVersion;
+    }
 }

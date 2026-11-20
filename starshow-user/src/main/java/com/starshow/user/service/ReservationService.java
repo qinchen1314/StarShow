@@ -173,11 +173,19 @@ public class ReservationService {
     }
 
     private MyReservationVO buildMyReservationVO(ShowBasicDTO show, ReservationDO record, boolean verified, LocalDateTime now) {
-        boolean ended = SHOW_STATUS_ENDED.equalsIgnoreCase(show.getSaleStatus())
-                || (show.getSaleEndTime() != null && now.isAfter(show.getSaleEndTime()));
-        boolean entryOpen = !ended
-                && show.getSaleStartTime() != null
-                && !now.isBefore(show.getSaleStartTime());
+        boolean ended;
+        boolean entryOpen;
+        String entryState = show.getEntryState();
+        if (entryState != null && !entryState.isBlank()) {
+            ended = "ENDED".equalsIgnoreCase(entryState);
+            entryOpen = "OPEN".equalsIgnoreCase(entryState);
+        } else {
+            ended = SHOW_STATUS_ENDED.equalsIgnoreCase(show.getSaleStatus())
+                    || (show.getSaleEndTime() != null && now.isAfter(show.getSaleEndTime()));
+            entryOpen = !ended
+                    && show.getSaleStartTime() != null
+                    && !now.isBefore(show.getSaleStartTime());
+        }
 
         boolean reserved = record != null;
         String nextAction;

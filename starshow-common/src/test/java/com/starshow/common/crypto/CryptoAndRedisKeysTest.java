@@ -43,7 +43,10 @@ class CryptoAndRedisKeysTest {
                 RedisKeys.deductLog(showId, orderNo),
                 RedisKeys.deductPendingZset(showId),
                 RedisKeys.rollbackDone(showId, orderNo),
-                RedisKeys.seatBitmap(showId, "HALL_A")
+                RedisKeys.seatBitmap(showId, "HALL_A"),
+                RedisKeys.seatLayout(showId, "HALL_A"),
+                RedisKeys.showReady(showId),
+                RedisKeys.showOpLock(showId)
         );
 
         String expectedTag = "{" + showId + "}";

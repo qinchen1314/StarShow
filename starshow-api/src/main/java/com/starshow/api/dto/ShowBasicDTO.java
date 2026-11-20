@@ -23,6 +23,11 @@ public class ShowBasicDTO implements Serializable {
     private LocalDateTime saleEndTime;
     private String saleStatus;
     private Integer saleConfigVersion;
+    private String seatMode;
+    /**
+     * 权威购票入口状态：PREPARING / OPEN / SOLD_OUT / STOCK_UNAVAILABLE / ENDED
+     */
+    private String entryState;
 
     public int effectiveSaleConfigVersion() {
         return (saleConfigVersion == null || saleConfigVersion < 1) ? 1 : saleConfigVersion;

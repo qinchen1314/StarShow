@@ -51,6 +51,22 @@ starshow:
     count-local-snapshot-ttl-ms: ${STARSHOW_COUNT_LOCAL_SNAPSHOT_TTL_MS:0}
     count-max-stale-seconds: ${STARSHOW_COUNT_MAX_STALE_SECONDS:120}
     remind-dispatch-jitter-seconds: ${STARSHOW_REMIND_DISPATCH_JITTER_SECONDS:0}
+  show:
+    detail-l1-ttl-seconds: ${STARSHOW_SHOW_DETAIL_L1_TTL_SECONDS:60}
+    detail-l1-max-size: ${STARSHOW_SHOW_DETAIL_L1_MAX_SIZE:5000}
+    detail-l2-logical-ttl-seconds: ${STARSHOW_SHOW_DETAIL_L2_LOGICAL_TTL_SECONDS:300}
+    detail-l2-jitter-seconds: ${STARSHOW_SHOW_DETAIL_L2_JITTER_SECONDS:300}
+    detail-max-stale-seconds: ${STARSHOW_SHOW_DETAIL_MAX_STALE_SECONDS:900}
+    negative-cache-ttl-seconds: ${STARSHOW_SHOW_NEGATIVE_CACHE_TTL_SECONDS:30}
+    cold-read-timeout-ms: ${STARSHOW_SHOW_COLD_READ_TIMEOUT_MS:150}
+    stock-local-ttl-ms: ${STARSHOW_SHOW_STOCK_LOCAL_TTL_MS:0}
+    preheat-batch-size: ${STARSHOW_SHOW_PREHEAT_BATCH_SIZE:50}
+    preheat-lease-seconds: ${STARSHOW_SHOW_PREHEAT_LEASE_SECONDS:30}
+    task-recovery-enabled: ${STARSHOW_SHOW_TASK_RECOVERY_ENABLED:true}
+    task-recovery-batch-size: ${STARSHOW_SHOW_TASK_RECOVERY_BATCH_SIZE:100}
+    lifecycle-sync-enabled: ${STARSHOW_SHOW_LIFECYCLE_SYNC_ENABLED:true}
+    bloom-enabled: ${STARSHOW_SHOW_BLOOM_ENABLED:true}
+    max-tickets-per-order: ${STARSHOW_SHOW_MAX_TICKETS_PER_ORDER:4}
 
 mybatis-plus:
   global-config:

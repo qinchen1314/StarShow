@@ -34,8 +34,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BizException.class)
     public ResponseEntity<Result<Void>> handleBizException(BizException ex) {
         ErrorCode code = ex.getErrorCode();
-        HttpStatus status = resolveHttpStatus(code);
-        return ResponseEntity.status(status).body(Result.fail(code, ex.getMessage()));
+        HttpStatus status = ex.getHttpStatus() != null
+                ? HttpStatus.valueOf(ex.getHttpStatus())
+                : resolveHttpStatus(code);
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(status);
+        if (ex.getRetryAfterMs() != null && ex.getRetryAfterMs() > 0) {
+            long retryAfterSec = Math.max(1L, (ex.getRetryAfterMs() + 999L) / 1000L);
+            builder.header("Retry-After", String.valueOf(retryAfterSec));
+            builder.header("X-Retry-After-Ms", String.valueOf(ex.getRetryAfterMs()));
+        }
+        return builder.body(Result.fail(code, ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -80,6 +88,9 @@ public class GlobalExceptionHandler {
         }
         if (code == ErrorCode.TOO_MANY_REQUESTS) {
             return HttpStatus.TOO_MANY_REQUESTS;
+        }
+        if (code == ErrorCode.STOCK_UNAVAILABLE) {
+            return HttpStatus.SERVICE_UNAVAILABLE;
         }
         if (code == ErrorCode.SYSTEM_ERROR) {
             return HttpStatus.INTERNAL_SERVER_ERROR;

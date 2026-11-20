@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS `t_show` (
     `show_time`           DATETIME      NOT NULL COMMENT '演出开演时间',
     `sale_start_time`     DATETIME      NOT NULL COMMENT '开票时间',
     `sale_end_time`       DATETIME      NOT NULL COMMENT '停售时间',
-    `sale_status`         VARCHAR(20)   NOT NULL DEFAULT 'INIT' COMMENT 'INIT/PREHEATED/ON_SALE/SOLD_OUT/ENDED',
+    `sale_status`         VARCHAR(20)   NOT NULL DEFAULT 'INIT' COMMENT 'INIT/PREHEATING/PREHEATED/ON_SALE/SOLD_OUT/ENDED',
     `sale_config_version` INT           NOT NULL DEFAULT 1 COMMENT '开售配置版本号（主办方改期+1，贯穿提醒与预热）',
     `seat_mode`           VARCHAR(20)   NOT NULL DEFAULT 'AUTO_ALLOC' COMMENT 'AUTO_ALLOC(自动配座)/MANUAL_SEAT(自主选座)',
     `poster_url`          VARCHAR(256)  NOT NULL DEFAULT '' COMMENT '海报地址',
@@ -101,7 +101,9 @@ CREATE TABLE IF NOT EXISTS `t_show` (
     `create_time`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time`         DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    KEY `idx_sale_start` (`sale_start_time`, `sale_status`)
+    KEY `idx_sale_start` (`sale_start_time`, `sale_status`),
+    KEY `idx_city_show_time` (`city`, `deleted`, `show_time`, `id`),
+    KEY `idx_deleted_show_time` (`deleted`, `show_time`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='演出场次表';
 
 CREATE TABLE IF NOT EXISTS `t_ticket_tier` (
@@ -128,6 +130,7 @@ CREATE TABLE IF NOT EXISTS `t_seat` (
     `seat_index`  INT         NOT NULL COMMENT '区域内Bitmap偏移量(0-based)',
     `row_no`      INT         NOT NULL COMMENT '排号',
     `col_no`      INT         NOT NULL COMMENT '座号',
+    `segment_id`  VARCHAR(24) NOT NULL DEFAULT 'S1' COMMENT '同排未被走道隔开的连续段标识',
     `status`      TINYINT     NOT NULL DEFAULT 0 COMMENT '0可选 1已售/锁定',
     `deleted`     TINYINT     NOT NULL DEFAULT 0,
     `create_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -136,6 +139,28 @@ CREATE TABLE IF NOT EXISTS `t_seat` (
     UNIQUE KEY `uk_show_zone_index` (`show_id`, `zone_id`, `seat_index`),
     KEY `idx_show_tier` (`show_id`, `tier_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='分区座位物理映射表';
+
+CREATE TABLE IF NOT EXISTS `t_show_task` (
+    `task_id`         BIGINT       NOT NULL COMMENT '任务ID(Snowflake)',
+    `show_id`         BIGINT       NOT NULL COMMENT '演出场次ID',
+    `task_type`       VARCHAR(32)  NOT NULL COMMENT '任务类型：PREHEAT/RESCHEDULE_SYNC/OPEN_SALE',
+    `version`         INT          NOT NULL COMMENT '关联的sale_config_version',
+    `execution_id`    VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '当前执行租约Fencing Token',
+    `status`          VARCHAR(24)  NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/RUNNING/SUCCEEDED/FAILED/CANCELLED',
+    `failed_stage`    VARCHAR(64)  NULL COMMENT '失败阶段标识',
+    `retryable`       TINYINT      NOT NULL DEFAULT 1 COMMENT '1可重试 0不可重试',
+    `attempt`         INT          NOT NULL DEFAULT 0 COMMENT '已尝试次数',
+    `next_retry_at`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次可重试时间',
+    `lease_until`     DATETIME     NULL COMMENT '当前执行租约截止时间',
+    `last_error_code` VARCHAR(32)  NULL COMMENT '最近错误码',
+    `last_error_msg`  VARCHAR(256) NULL COMMENT '最近错误摘要',
+    `deleted`         TINYINT      NOT NULL DEFAULT 0,
+    `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`task_id`),
+    UNIQUE KEY `uk_show_task_version` (`show_id`, `task_type`, `version`),
+    KEY `idx_task_schedule` (`status`, `next_retry_at`, `task_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='演出预热与状态推进任务恢复表';
 
 -- ----------------------------------------------------------------------------
 -- 3. 订单与履约域 (starshow-order) - 按 user_id 基因分 4 表

@@ -29,7 +29,8 @@ VALUES
     (20005, 10003, '跨年盛典内场票', 'NYE_A', 128000, 5000, 5000, 0);
 
 -- 为 10002 场次生成 10排 x 10座 = 100 个物理座位映射（对应 Bitmap offset 0..99）
-INSERT IGNORE INTO `t_seat` (`show_id`, `tier_id`, `zone_id`, `seat_index`, `row_no`, `col_no`, `status`)
+-- 真实走道分布：每排 1~3 座为左段(L)、4~7 座为中段(M)、8~10 座为右段(R)，走道隔开不同 segment_id
+INSERT IGNORE INTO `t_seat` (`show_id`, `tier_id`, `zone_id`, `seat_index`, `row_no`, `col_no`, `segment_id`, `status`)
 SELECT
     10002,
     20004,
@@ -37,6 +38,11 @@ SELECT
     (r.n * 10 + c.n) AS seat_index,
     (r.n + 1)        AS row_no,
     (c.n + 1)        AS col_no,
+    CASE
+        WHEN c.n < 3 THEN CONCAT('R', r.n + 1, '-L')
+        WHEN c.n < 7 THEN CONCAT('R', r.n + 1, '-M')
+        ELSE CONCAT('R', r.n + 1, '-R')
+    END              AS segment_id,
     0
 FROM
     (SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4

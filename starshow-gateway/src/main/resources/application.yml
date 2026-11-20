@@ -21,6 +21,7 @@ spring:
           uri: ${SHOW_SERVICE_URI:http://127.0.0.1:8002}
           predicates:
             - Path=/api/v1/shows/**
+            - Method=GET
         - id: starshow-order
           uri: ${ORDER_SERVICE_URI:http://127.0.0.1:8003}
           predicates:

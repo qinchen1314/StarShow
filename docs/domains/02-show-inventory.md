@@ -1,8 +1,8 @@
 # 板块 02：链路二完整开发设计规格书（演出浏览 · 多级缓存 · 分区选座 · 开售预热）
 
-- **文档状态**　设计评审稿。仓库已有演出、票档基础读接口和改期接口。公开浏览、版本化预热、库存读接口和座位图属于 Phase 2 待实现范围。
+- **文档状态**　✅ 已实现并通过 Phase 2 Prove-It 实证验收（分支 `feat/chain2-show-inventory`）。
 - **映射模块**　`starshow-show` 主责，联动 `starshow-user`、`starshow-api`、`starshow-common`、`starshow-gateway` 和 `starshow-order`。
-- **目标里程碑**　Phase 2（`v0.3.0-chain2`）。
+- **目标里程碑**　Phase 2（`v0.3.0-chain2`，待打 Tag）。
 
 用户从预约提醒打开演出页时，应当看到最新开售时间、适用票档和下一步。浏览始终可用的目标是保护详情与座位图读取。交易正确性的目标是让过时页面、重复预热和缓存故障都无法改写已经开始售卖的库存。
 
@@ -169,4 +169,17 @@ sequenceDiagram
 | 跨链路 | `10003` 构造改期提前和推迟各一次，核验通知、详情、准入版本一致。仅在新开售时刻且预热就绪时接受购票。分别在单进程和分布式原包实跑。 |
 | 监控 | 记录 L1/L2 命中、详情回源次数、锁竞争、重建队列拒绝、预热耗时、库存缺键和提示售罄次数。压测回执记录硬件和请求分布。 |
 
-开发顺序为公开读契约与快照 → 分区视图 → 版本化预热 → 开售门禁 → 改期、提醒和双形态联调。验收命令按 `mvn -B -pl starshow-show -am test` 和隔离 Docker MySQL/Redis/RocketMQ 实跑。此处列的是验收口径，待实现后填写实测数据。
+开发顺序为公开读契约与快照 → 分区视图 → 版本化预热 → 开售门禁 → 改期、提醒和双形态联调。
+
+### Phase 2 实证验收结果（2026-11-20）
+
+- **L1 常规与契约测试**：`mvn -B clean package` 9/9 模块 `BUILD SUCCESS`，合计 **74/74** 常规测试全绿（`starshow-common` 18 + `starshow-gateway` 7 + `starshow-user` 30 + `starshow-show` 18 + `starshow-boot-all` 1），0 失败、0 错误，覆盖稳定游标、城市筛选、逻辑过期与最大陈旧上限、冷读超时 `503/B9999`、`Long` 金额/ID 字符串序列化、MSB 最高位 Bitmap 解码与走道 `segmentId`、毫秒级开售/停售边界、`{showId}` 单槽 Hash Tag 与安全改期/预热 Fencing 拦截。
+- **真实 Docker 中间件验收**（隔离 MySQL 测试库 + 隔离 Redis DB 14 + RocketMQ 5.3）：`Chain2LiveMiddlewareVerificationTest`（5/5）+ `Chain1LiveMiddlewareVerificationTest`（5/5）共 **10/10 全绿**：
+  - 并发 100 请求读取同一逻辑过期热点详情 → MySQL 重建次数严格 `== 1`；
+  - 目录布隆拦截 50 个批量不存在 `showId` → 详情回源 SQL 严格 `== 0`，新增场次经目录同步立即可见且不被旧布隆永久误杀；
+  - 预热容错五连测（同版本幂等、中途崩溃租约过期换新 `executionId` 续跑收敛、失租约旧写入被 Lua 拒绝、改期后旧版任务复活被拒绝、`ON_SALE` 后晚到旧任务 0 覆盖在售库存）全部通过；
+  - `10002` 10×10 座位图 MSB 解码与走道 `R1-L / R1-M / R1-R ... R10-R` 准确，四态（`PREPARING` / 缺键 `503/B0201` / 真实零余量 `200/SOLD_OUT` / `ENDED`）零混淆；
+  - `10003` 推迟与提前改期闭环验证链路一 `SCHEDULE_CHANGED` 通知、详情页、我的预约 `entryOpen` 与预热/开售版本 100% 一致。
+- **双形态原始发行包隔离 E2E**（`scripts/verify-chain2-e2e.ps1`）：
+  - `monolith`（`starshow-boot-all` + `starshow-gateway`，含缺失密钥启动拒绝门禁）全绿，默认 MySQL `starshow` 与 Redis DB 0 哨兵 100% 完好；
+  - `distributed`（`starshow-show-exec.jar` 零补丁冷启动 + `starshow-user-exec.jar` 真实 OpenFeign 双向联调 + `starshow-gateway`）全绿，公网网关零写路由，默认库哨兵 100% 完好。

@@ -40,19 +40,19 @@
 | `GET /api/v1/reservations/{showId}/count` | 查询场次预约人数。热态读取单 Key Hash `{epoch,count}`，有界最终一致（默认 30s 过期不续期，Fencing Token 防旧覆盖；Phase 1.1 已实装 SingleFlight 回源合并、带时间戳微快照 `asOfEpochMs`/`stale`/`countAvailable` 与故障降级） | 公开 | ✅ Phase 1.1 已验收 |
 | `GET /api/v1/notifications/me` | 查询本人站内通知列表与购票入口（支持 `REMIND_BEFORE_SALE` 开票提醒与 `SCHEDULE_CHANGED` 改期即时变更两类，`uk_biz_key` 重放仅留一条） | 登录 | ✅ Phase 1.1 已验收 |
 | `POST /api/v1/notifications/{notificationId}/read` | 标记站内提醒已读并记录打开时间（区分送达/可见/打开三类指标） | 登录 | ✅ Phase 1.1 已验收 |
-| `GET /internal/shows/{showId}/basic` | 演出基础元数据内部只读契约（含 `saleConfigVersion`，`distributed` 模式下由 `starshow-user` 通过 OpenFeign 调用，强制校验 `X-Internal-Gateway-Secret`） | 内部密钥 | ✅ Phase 1.1 已验收 |
-| `PUT /internal/shows/{showId}/schedule` | 主办方改期开售时间内部契约（仅限未开售场次，乐观 CAS 推进 `sale_config_version + 1` 并重置 `PREHEATED -> INIT`） | 内部密钥 | ✅ Phase 1.1 已验收 |
-| `POST /internal/reservations/shows/{showId}/reschedule` | 改期后联动重排该场次已有预约提醒至最新 `saleConfigVersion`（提前入窗/推迟出窗/已开售置 `4`，旧版延迟消息消费端按版本跳过） | 内部密钥 | ✅ Phase 1.1 已验收 |
+| `GET /internal/shows/{showId}/basic` | 演出基础元数据内部只读契约（含权威 `saleConfigVersion`、`seatMode` 与 `entryState`，`distributed` 模式下由 `starshow-user` 通过 OpenFeign 调用，强制校验 `X-Internal-Gateway-Secret`） | 内部密钥 | ✅ Phase 2 已升级验收 |
+| `PUT /internal/shows/{showId}/schedule` | 主办方安全改期开售时间内部契约（覆盖 `INIT`/`PREHEATING`/`PREHEATED`，Redis 原子 `BLOCKED` + 乐观 CAS 推进 `sale_config_version + 1` + 刷新 L2 + 自动联动链路一重排提醒） | 内部密钥 | ✅ Phase 2 已升级验收 |
+| `POST /internal/reservations/shows/{showId}/reschedule` | 改期后联动重排该场次已有预约提醒至最新 `saleConfigVersion`（单进程本地调用 / 分布式 OpenFeign，提前入窗/推迟出窗/已开售置 `4`，旧版延迟消息消费端按版本跳过） | 内部密钥 | ✅ Phase 2 已联调验收 |
 
 ### 链路二：演出、余票与选座 (`starshow-show`)
 | 方法与路径 | 说明 | 鉴权 | 状态 |
 | --- | --- | --- | --- |
-| `GET /api/v1/shows` | 按城市与时间游标浏览演出摘要。 | 公开 | Phase 2 |
-| `GET /api/v1/shows/{showId}` | 返回开售时间、配置版本、座位模式、票档和入口状态。详情元数据经过 Caffeine L1 和 Redis L2。 | 公开 | Phase 2 |
-| `GET /api/v1/shows/{showId}/stock` | 返回票档余量、快照时间和状态。有效零余量显示售罄，缺失或异常单独标识。 | 公开 | Phase 2 |
-| `GET /api/v1/shows/{showId}/zones/{zoneId}/seats` | 返回分区布局版本、可选位置与快照时间。 | 公开 | Phase 2 |
-| `POST /internal/shows/{showId}/preheat` | 按 `saleConfigVersion` 幂等创建或查询预热任务。全项校验后置 `PREHEATED`，到 `saleStartTime` 毫秒级准点开放交易。 | 内部密钥（公网零路由） | Phase 2 |
-| `GET /internal/shows/{showId}/tiers/{tierId}/snapshot` | 返回用于下单校验的权威价格、购票数量限制、售卖窗口和版本。 | 内部密钥 | Phase 2 |
+| `GET /api/v1/shows` | 按城市与稳定时间游标（`show_time, id`）浏览演出摘要，游标强绑定筛选条件。 | 公开 | ✅ Phase 2 已验收 |
+| `GET /api/v1/shows/{showId}` | 返回权威开售时间、配置版本、座位模式、票档（`Long` 字符串序列化）和入口四态。静态元数据经 Caffeine L1（60s）+ Redis L2 逻辑过期 + 布隆防穿透与 30s 空值缓存。 | 公开 | ✅ Phase 2 已验收 |
+| `GET /api/v1/shows/{showId}/stock` | 返回票档余量、快照时间和状态。有效零余量返回 `200/SOLD_OUT`，在售期部分缺失标 `available=null/STOCK_UNAVAILABLE`，整体不可用返回 `503/B0201` + `Retry-After`。 | 公开 | ✅ Phase 2 已验收 |
+| `GET /api/v1/shows/{showId}/zones/{zoneId}/seats` | 返回分区布局版本、MSB 最高位优先位图解码结果与走道 `segmentId`；在售期位图缺失或异常返回 `503/B0201`。 | 公开 | ✅ Phase 2 已验收 |
+| `POST /internal/shows/{showId}/preheat` | 按 `(showId, saleConfigVersion)` 幂等创建/查询预热任务，Fencing Token Lua 分批写入并全量回读校验后置 `READY`/`PREHEATED`，到 `saleStartTime` 毫秒级准点开放。 | 内部密钥（公网零路由） | ✅ Phase 2 已验收 |
+| `GET /internal/shows/{showId}/tiers/{tierId}/snapshot` | 返回用于下单校验的权威价格（分）、`saleConfigVersion`、`layoutVersion`、`maxTicketsPerOrder`、售卖窗口和座位模式。 | 内部密钥 | ✅ Phase 2 已验收 |
 
 ### 链路三：抢票下单引擎 V1~V4 (`starshow-order`)
 | 方法与路径 | 说明 | 鉴权 | 状态 |

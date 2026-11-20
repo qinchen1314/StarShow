@@ -93,7 +93,9 @@ public class ShowRemindRecoveryScheduler {
             throw new BizException(ErrorCode.SHOW_NOT_FOUND);
         }
         int newVersion = show.effectiveSaleConfigVersion();
-        int resetCount = reservationMapper.resetReservationsForScheduleVersion(showId, newVersion, LocalDateTime.now());
+        // 截断至整秒并回拨 1 秒，杜绝 MySQL DATETIME 无小数秒四舍五入进位导致紧随其后的 recoverDueReminders 漏扫
+        LocalDateTime immediateRetryAt = LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(1);
+        int resetCount = reservationMapper.resetReservationsForScheduleVersion(showId, newVersion, immediateRetryAt);
         int batchSize = Math.max(1, properties.getRemindRecoveryBatchSize());
         int maxBatches = Math.max(1, properties.getRemindRecoveryMaxBatchesPerRun());
 
@@ -186,7 +188,9 @@ public class ShowRemindRecoveryScheduler {
                 int latestVersion = show.effectiveSaleConfigVersion();
                 if (reservation.effectiveRemindConfigVersion() < latestVersion) {
                     reservationMapper.resetReservationsForScheduleVersion(
-                            reservation.getShowId(), latestVersion, LocalDateTime.now()
+                            reservation.getShowId(),
+                            latestVersion,
+                            LocalDateTime.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).minusSeconds(1)
                     );
                 }
 

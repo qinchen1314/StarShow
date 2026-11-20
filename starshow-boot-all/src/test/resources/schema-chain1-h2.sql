@@ -96,6 +96,44 @@ CREATE TABLE IF NOT EXISTS t_ticket_tier (
     PRIMARY KEY (id)
 );
 
+CREATE TABLE IF NOT EXISTS t_seat (
+    id          BIGINT      NOT NULL AUTO_INCREMENT,
+    show_id     BIGINT      NOT NULL,
+    tier_id     BIGINT      NOT NULL,
+    zone_id     VARCHAR(32) NOT NULL,
+    seat_index  INT         NOT NULL,
+    row_no      INT         NOT NULL,
+    col_no      INT         NOT NULL,
+    segment_id  VARCHAR(24) NOT NULL DEFAULT 'S1',
+    status      TINYINT     NOT NULL DEFAULT 0,
+    deleted     TINYINT     NOT NULL DEFAULT 0,
+    create_time TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_show_zone_index UNIQUE (show_id, zone_id, seat_index)
+);
+
+CREATE TABLE IF NOT EXISTS t_show_task (
+    task_id         BIGINT       NOT NULL,
+    show_id         BIGINT       NOT NULL,
+    task_type       VARCHAR(32)  NOT NULL,
+    version         INT          NOT NULL,
+    execution_id    VARCHAR(64)  NOT NULL DEFAULT '',
+    status          VARCHAR(24)  NOT NULL DEFAULT 'PENDING',
+    failed_stage    VARCHAR(64)  NULL,
+    retryable       TINYINT      NOT NULL DEFAULT 1,
+    attempt         INT          NOT NULL DEFAULT 0,
+    next_retry_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lease_until     TIMESTAMP    NULL,
+    last_error_code VARCHAR(32)  NULL,
+    last_error_msg  VARCHAR(256) NULL,
+    deleted         TINYINT      NOT NULL DEFAULT 0,
+    create_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (task_id),
+    CONSTRAINT uk_show_task_version UNIQUE (show_id, task_type, version)
+);
+
 INSERT INTO t_show (id, title, artist, city, venue, show_time, sale_start_time, sale_end_time, sale_status, seat_mode, poster_url, description)
 VALUES (10003, '星演跨年盛典 · 预约蓄水专场', 'StarShow Special', '深圳', '深圳湾体育中心',
         TIMESTAMPADD(DAY, 31, CURRENT_TIMESTAMP),

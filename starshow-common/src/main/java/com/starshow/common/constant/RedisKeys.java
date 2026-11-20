@@ -42,8 +42,28 @@ public final class RedisKeys {
         return "starshow:lock:show_rebuild:" + showId;
     }
 
+    public static String showBloom() {
+        return "starshow:show:bloom:catalog";
+    }
+
+    public static String showBloomReady() {
+        return "starshow:show:bloom:ready";
+    }
+
+    public static String showReady(long showId) {
+        return "starshow:show:ready:{" + showId + "}";
+    }
+
+    public static String showOpLock(long showId) {
+        return "starshow:lock:show_op:{" + showId + "}";
+    }
+
     public static String seatBitmap(long showId, String zoneId) {
         return "starshow:seat:bitmap:{" + showId + "}:" + zoneId;
+    }
+
+    public static String seatLayout(long showId, String zoneId) {
+        return "starshow:seat:layout:{" + showId + "}:" + zoneId;
     }
 
     // ---------- 抢票核心原子集群（链路三，全部共享 {showId} Hash Tag） ----------

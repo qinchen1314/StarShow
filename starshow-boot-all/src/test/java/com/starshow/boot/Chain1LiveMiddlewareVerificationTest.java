@@ -11,7 +11,10 @@ import com.starshow.common.exception.BizException;
 import com.starshow.common.id.GeneSnowflakeIdGenerator;
 import com.starshow.common.result.ErrorCode;
 import com.starshow.show.domain.entity.ShowDO;
+import com.starshow.show.domain.entity.TicketTierDO;
 import com.starshow.show.mapper.ShowMapper;
+import com.starshow.show.mapper.TicketTierMapper;
+import com.starshow.show.service.ShowPreheatService;
 import com.starshow.show.service.ShowScheduleService;
 import com.starshow.user.config.ReservationProperties;
 import com.starshow.user.domain.entity.ReservationDO;
@@ -114,6 +117,10 @@ class Chain1LiveMiddlewareVerificationTest {
     private UserNotificationService userNotificationService;
     @Autowired
     private ShowMapper showMapper;
+    @Autowired
+    private TicketTierMapper ticketTierMapper;
+    @Autowired
+    private ShowPreheatService showPreheatService;
     @Autowired
     private ShowScheduleService showScheduleService;
     @Autowired
@@ -523,13 +530,11 @@ class Chain1LiveMiddlewareVerificationTest {
         LocalDateTime postponedStart = LocalDateTime.now().plusDays(10);
         ShowBasicDTO v2Show = showScheduleService.reschedule(LIVE_SHOW_RESCHEDULE_POSTPONE, postponedStart, postponedStart.plusDays(10));
         assertEquals(2, v2Show.getSaleConfigVersion());
-        ShowRescheduleResultVO v2Reschedule = recoveryScheduler.rescheduleForShowVersion(LIVE_SHOW_RESCHEDULE_POSTPONE);
-        assertEquals(2, v2Reschedule.getSaleConfigVersion());
-        assertEquals(1, v2Reschedule.getResetReservationCount());
-        assertEquals(1, v2Reschedule.getScheduleNotifiedCount(), "Reschedule must immediately notify affected fans");
-
-        // 幂等重放一次改期重排：不得重复落第二条 SCHEDULE_CHANGED 通知
+        // Phase 2: 改期时 ShowScheduleService 已自动本地联动完成预约重排与 SCHEDULE_CHANGED 通知；
+        // 再次调用 rescheduleForShowVersion 必须幂等不重复重置、不重复落通知
         ShowRescheduleResultVO v2RescheduleDup = recoveryScheduler.rescheduleForShowVersion(LIVE_SHOW_RESCHEDULE_POSTPONE);
+        assertEquals(2, v2RescheduleDup.getSaleConfigVersion());
+        assertEquals(0, v2RescheduleDup.getResetReservationCount());
         assertEquals(0, v2RescheduleDup.getScheduleNotifiedCount());
 
         // 等待原本 2 秒后触发的旧 v1 延迟消息被真实 RocketMQ 投递并由消费端按版本守卫丢弃
@@ -541,11 +546,10 @@ class Chain1LiveMiddlewareVerificationTest {
         assertEquals(UserNotificationDO.TYPE_SCHEDULE_CHANGED, notifsAfterPostpone.get(0).getNotificationType());
         assertEquals(2, notifsAfterPostpone.get(0).getSaleConfigVersion());
 
-        // 将排期调整为近窗口 v3 -> 触发重排 -> 真实 RocketMQ 送达 v3 且同事务落 1 条 REMIND_BEFORE_SALE，重放仍只保留 1 条
+        // 将排期调整为近窗口 v3 -> 自动联动重排 -> 真实 RocketMQ 送达 v3 且同事务落 1 条 REMIND_BEFORE_SALE，重放仍只保留 1 条
         LocalDateTime v3Start = LocalDateTime.now().plusMinutes(5);
         ShowBasicDTO v3Show = showScheduleService.reschedule(LIVE_SHOW_RESCHEDULE_POSTPONE, v3Start, v3Start.plusDays(10));
         assertEquals(3, v3Show.getSaleConfigVersion());
-        recoveryScheduler.rescheduleForShowVersion(LIVE_SHOW_RESCHEDULE_POSTPONE);
         awaitRemindSent(v1Rsv.getReservationId(), 15);
         assertEquals(1, countingNotifier.countFor(v1Rsv.getReservationId()));
 
@@ -572,17 +576,26 @@ class Chain1LiveMiddlewareVerificationTest {
                 .build());
         assertEquals(notifs.size(), userNotificationService.listMyNotifications(userPostpone, 10).size());
 
-        // === 2. 提前改期至已开售：远期 v1(status=0) -> 提前至已开售(v2) -> 置 4(SKIPPED)、即时落 SCHEDULE_CHANGED、/me 返 entryOpen=true ===
+        // === 2. 提前改期至已开售：远期 v1(status=0) -> 提前至已开售(v2) -> 置 4(SKIPPED)、即时落 SCHEDULE_CHANGED；
+        //       未预热前 entryOpen=false，预热就绪后 /me 毫秒级开放 entryOpen=true & ENTER_SECKILL ===
         insertShow(LIVE_SHOW_RESCHEDULE_ADVANCE, "改期提前验证专场", LocalDateTime.now().plusDays(10));
+        if (ticketTierMapper.selectById(910151L) == null) {
+            ticketTierMapper.insert(TicketTierDO.builder()
+                    .id(910151L).showId(LIVE_SHOW_RESCHEDULE_ADVANCE).tierName("内场").zoneId("ADV_A")
+                    .priceCent(68000L).totalStock(100).availableStock(100).version(0).deleted(0).build());
+        }
         ReservationVO advRsv = reservationService.reserve(userAdvance, LIVE_SHOW_RESCHEDULE_ADVANCE);
         assertEquals(ReservationDO.REMIND_PENDING, reservationMapper.selectById(advRsv.getReservationId()).getRemindStatus());
 
         LocalDateTime alreadyStarted = LocalDateTime.now().minusMinutes(1);
         showScheduleService.reschedule(LIVE_SHOW_RESCHEDULE_ADVANCE, alreadyStarted, alreadyStarted.plusDays(10));
-        recoveryScheduler.rescheduleForShowVersion(LIVE_SHOW_RESCHEDULE_ADVANCE);
 
         ReservationDO advAfter = reservationMapper.selectById(advRsv.getReservationId());
         assertEquals(ReservationDO.REMIND_SKIPPED, advAfter.getRemindStatus());
+        MyReservationVO myAdvBeforePreheat = reservationService.getMyReservation(userAdvance, LIVE_SHOW_RESCHEDULE_ADVANCE);
+        assertFalse(myAdvBeforePreheat.isEntryOpen(), "Phase 2: 未预热前即使已过开售时刻也不得误放行入口");
+        assertEquals("READY", showPreheatService.preheat(LIVE_SHOW_RESCHEDULE_ADVANCE, 2).getTaskStatus());
+
         MyReservationVO myAdv = reservationService.getMyReservation(userAdvance, LIVE_SHOW_RESCHEDULE_ADVANCE);
         assertTrue(myAdv.isReserved());
         assertTrue(myAdv.isRealNameVerified());
