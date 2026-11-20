@@ -48,6 +48,8 @@ description: >-
 - **运行态端到端抽检**（当改动涉及 HTTP API、Docker Compose、SQL DDL 或 Lua 时）：
   - 优先在真实运行环境（Docker 中间件 / Testcontainers / SpringBootTest）走通至少一条完整请求链路（如 `curl` / MockMvc / 真实 Redis 执行 Lua 返回码校验），而非只看单元测试 Mock。
   - 若当前本机 Docker 未启动导致集成测试无法连接真实中间件，**必须如实标明“集成实跑受限于 Docker 未启动”**，绝不允许伪造通过。
+- **文档治理同步核查（Docs-as-Code）**：
+  - 对照 `docs/README.md` 的模块↔文档映射矩阵，确认接口/状态机/板块行为变更已同步更新至 `docs/domains/0x-*.md`、`docs/contracts/API_CONTRACT.md`，且阶段完成时已刷新 `docs/PROGRESS.md`。
 - **GitHub 提交前脱敏扫描**：
   - 扫描待提交变更，确认零真实密码/密钥、零个人真实邮箱、零本机绝对路径、零代理配置泄露，且 `.env` 未被跟踪。
 
@@ -61,6 +63,7 @@ description: >-
 - **实跑命令与结果**：`<实际执行的命令>` → `Tests run: X, Failures: 0, Errors: 0`（附关键并发/剧本实测指标）
 - **运行态证据**：<真实接口返回 / Lua 返回码 / DB 核对断言，或如实说明环境受限项>
 - **Diff 防弱化审计**：已检查 `git diff`，确认未删除/弱化任何既有测试断言
+- **文档治理同步**：<已同步更新的具体 docs/ 文件，或“纯内部重构无契约变化”>
 - **脱敏与仓库卫生**：已扫描待提交变更，0 敏感密钥/本机路径/真实邮箱泄露
 - **剩余缺口（诚实声明）**：<若无则写“无”；若有未覆盖的集成/压测场景必须明确列出>
 ```

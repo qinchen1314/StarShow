@@ -32,8 +32,9 @@
 
 ```text
 starshow-ticket/
+├── .agents/skills/         # 项目级开发宪法 (starshow) 与实证验收门禁 (prove-it)
 ├── docker/                 # Core 核心栈 & Ops 扩展栈 Docker Compose、MySQL DDL/Seed、RocketMQ 配置
-├── docs/                   # 架构设计与 V1->V4 压测报告
+├── docs/                   # 文档治理中心：PROGRESS 账本、4 大业务板块映射、API 契约、ADR 与压测报告
 ├── starshow-common/        # 统一返回、错误码、基因Snowflake、状态机、AES/HMAC加密、Redis Key契约
 ├── starshow-api/           # 内部 Facade 契约、DTO、RocketMQ Event Schema
 ├── starshow-gateway/       # Spring Cloud Gateway 入口路由与限流

@@ -56,12 +56,13 @@ description: >-
 
 ## 标准开发与验收工作流
 
-1. 阅读 `references/core.md` 及本次任务对应的参考文档。
+1. 阅读 `references/core.md`、`docs/PROGRESS.md`（恢复当前阶段进度）及目标板块的 `docs/domains/0x-*.md` 与对应参考文档。
 2. 审阅现有代码与 `docs/ARCHITECTURE.md`，通过编码前 9 问自检门禁。
 3. 严格按分层落地实现（Controller → Application Service / Strategy → Domain/StateMachine → Infrastructure Mapper/Lua/MQ）。
 4. 编写与风险等级相匹配的测试（单测 / 并发零超卖 / 故障注入剧本）。
-5. **激活 `prove-it` Skill**：实跑测试与运行时验证、检查 `git diff`（防测试弱化 + 脱敏扫描）、输出结构化《实证验收回执》。
-6. 对照 `references/review-checklist.md` 完成最终自查后交付。
+5. **文档治理同步（Docs-as-Code）**：按 `docs/README.md` 映射矩阵同步更新对应的 `docs/domains/0x-*.md`、`docs/contracts/API_CONTRACT.md` 与 `docs/PROGRESS.md`（若涉及规则变更，补录 `docs/adr/`）。
+6. **激活 `prove-it` Skill**：实跑测试与运行时验证、检查 `git diff`（防测试弱化 + 文档同步 + 脱敏扫描）、输出结构化《实证验收回执》。
+7. 对照 `references/review-checklist.md` 完成最终自查后交付。
 
 ## 全链路演进蓝图
 

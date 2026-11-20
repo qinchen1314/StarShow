@@ -2,9 +2,10 @@
 
 本文件固化项目最高优先级的架构红线、数据契约与编码规范。所有后续开发（Phase 1 ~ Phase 6）必须严格遵守，禁止偏离。
 
-> **项目级专属 Skills（按需联动）**：
+> **项目级专属 Skills 与文档治理入口（按需联动）**：
 > - 开发宪法与渐进式参考路由：`.agents/skills/starshow/SKILL.md`
 > - 实证验收与测试防弱化门禁：`.agents/skills/prove-it/SKILL.md`（任何代码改动与里程碑交付前强制执行）
+> - 文档治理总导航与进度账本：`docs/README.md`、`docs/PROGRESS.md`（跨会话接续第一入口）
 
 ---
 
