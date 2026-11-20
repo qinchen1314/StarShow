@@ -1,0 +1,95 @@
+name: starshow-core
+
+services:
+  mysql:
+    image: mysql:8.0.39
+    container_name: starshow-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-starshow_dev_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-starshow}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=300
+      - --innodb_buffer_pool_size=512M
+    volumes:
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+      - starshow_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_PASSWORD:-starshow_dev_pass}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: starshow-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-starshow_redis_pass}
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy noeviction
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - starshow_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-starshow_redis_pass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rmqnamesrv:
+    image: apache/rocketmq:5.3.0
+    container_name: starshow-rmq-namesrv
+    restart: unless-stopped
+    ports:
+      - "9876:9876"
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx256m"
+    command: sh mqnamesrv
+
+  rmqbroker:
+    image: apache/rocketmq:5.3.0
+    container_name: starshow-rmq-broker
+    restart: unless-stopped
+    depends_on:
+      - rmqnamesrv
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      NAMESRV_ADDR: rmqnamesrv:9876
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m"
+    volumes:
+      - ./rocketmq/broker.conf:/home/rocketmq/rocketmq-5.3.0/conf/broker.conf:ro
+      - starshow_rmq_store:/home/rocketmq/store
+    command: sh mqbroker -n rmqnamesrv:9876 -c /home/rocketmq/rocketmq-5.3.0/conf/broker.conf --enable-proxy
+
+  nacos:
+    image: nacos/nacos-server:v2.4.3
+    container_name: starshow-nacos
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      JVM_XMS: 256m
+      JVM_XMX: 384m
+      NACOS_AUTH_ENABLE: "false"
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+
+volumes:
+  starshow_mysql_data:
+  starshow_redis_data:
+  starshow_rmq_store:

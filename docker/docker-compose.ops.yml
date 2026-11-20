@@ -1,0 +1,62 @@
+name: starshow-ops
+
+# 按需扩展可观测与调度栈：
+# docker compose -f docker/docker-compose.yml -f docker/docker-compose.ops.yml --profile ops up -d
+
+services:
+  sentinel:
+    image: bladex/sentinel-dashboard:1.8.8
+    container_name: starshow-sentinel
+    profiles: ["ops"]
+    restart: unless-stopped
+    ports:
+      - "8858:8858"
+    environment:
+      JAVA_OPTS: "-Xms128m -Xmx256m -Dserver.port=8858 -Dcsp.sentinel.dashboard.server=localhost:8858 -Dproject.name=sentinel-dashboard"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: starshow-prometheus
+    profiles: ["ops"]
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: starshow-grafana
+    profiles: ["ops"]
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-change_me_grafana}
+    volumes:
+      - starshow_grafana_data:/var/lib/grafana
+
+  xxl-job-admin:
+    image: xuxueli/xxl-job-admin:2.4.1
+    container_name: starshow-xxl-job
+    profiles: ["ops"]
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      PARAMS: >
+        --spring.datasource.url=jdbc:mysql://host.docker.internal:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+        --spring.datasource.username=root
+        --spring.datasource.password=${MYSQL_PASSWORD:-starshow_dev_pass}
+        --xxl.job.accessToken=${XXL_JOB_ACCESS_TOKEN:-change_me_xxl_token}
+      JAVA_OPTS: "-Xms128m -Xmx256m"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  starshow_grafana_data:

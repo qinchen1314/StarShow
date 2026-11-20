@@ -1,0 +1,45 @@
+# Maven / Java
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+*.jar
+*.war
+*.ear
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env & Secrets (严禁提交真实密钥)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+
+# Docker Runtime Data
+docker/data/
+docker/logs/
+docker/rocketmq/logs/
+docker/rocketmq/store/

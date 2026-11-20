@@ -1,0 +1,36 @@
+server:
+  port: 8000
+
+spring:
+  application:
+    name: starshow-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:starshow_redis_pass}
+  cloud:
+    gateway:
+      routes:
+        - id: starshow-user
+          uri: ${USER_SERVICE_URI:http://127.0.0.1:8001}
+          predicates:
+            - Path=/api/v1/users/**,/api/v1/auth/**,/api/v1/reservations/**
+        - id: starshow-show
+          uri: ${SHOW_SERVICE_URI:http://127.0.0.1:8002}
+          predicates:
+            - Path=/api/v1/shows/**
+        - id: starshow-order
+          uri: ${ORDER_SERVICE_URI:http://127.0.0.1:8003}
+          predicates:
+            - Path=/api/v1/orders/**,/api/v1/seckill/**,/api/v1/tickets/**
+        - id: starshow-payment
+          uri: ${PAYMENT_SERVICE_URI:http://127.0.0.1:8004}
+          predicates:
+            - Path=/api/v1/payments/**,/api/v1/refunds/**,/api/v1/reconciliation/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

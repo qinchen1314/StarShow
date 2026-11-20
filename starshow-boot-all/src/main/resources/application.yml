@@ -1,0 +1,42 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: starshow-boot-all
+  profiles:
+    active: ${STARSHOW_PROFILE:monolith}
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:starshow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:starshow_dev_pass}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:starshow_redis_pass}
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: pg-starshow-boot-all
+
+starshow:
+  worker-id: ${STARSHOW_WORKER_ID:1}
+  seckill:
+    # 动态切换抢票演进策略：V1 | V2 | V3 | V4
+    strategy: ${STARSHOW_SECKILL_STRATEGY:V4}
+  security:
+    jwt-secret: ${STARSHOW_JWT_SECRET:starshow-dev-jwt-secret-key-please-change-in-production-32bytes}
+    aes-key: ${STARSHOW_AES_KEY:0123456789abcdef0123456789abcdef}
+    idcard-pepper: ${STARSHOW_IDCARD_PEPPER:starshow-dev-idcard-hmac-pepper-change-me}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+knife4j:
+  enable: true
