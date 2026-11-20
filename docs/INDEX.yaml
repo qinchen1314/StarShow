@@ -1,0 +1,158 @@
+# StarShow 全局开发路由字典 (O(1) 快速定位索引)
+# 用法：AI 每次开发前先匹配一条 route，仅读取该条目的 read_docs + read_refs，
+# 禁止全量通读无关板块文档，最大程度节省上下文注意力。
+
+version: 1
+bootstrap:
+  always_read_first:
+    - docs/PROGRESS.md
+    - .agents/skills/starshow/references/core.md
+
+routes:
+  chain1_user_reservation:
+    title: 链路一 · 鉴权、实名防黄牛与预约蓄水
+    phase: Phase 1 (v0.2.0-chain1)
+    triggers: [登录, 注册, JWT, 黑名单, 踢人, 实名, 身份证, AES, HMAC, 防黄牛, 预约, 布隆, 开票提醒, 延迟提醒, gateway]
+    read_docs:
+      - docs/domains/01-user-reservation.md
+      - docs/contracts/API_CONTRACT.md
+    read_refs:
+      - .agents/skills/starshow/references/spring-boot-api.md
+      - .agents/skills/starshow/references/storage-contracts.md
+      - .agents/skills/starshow/references/examples.md
+    code_anchors:
+      - starshow-user/
+      - starshow-gateway/
+      - starshow-common/src/main/java/com/starshow/common/crypto/CryptoUtil.java
+      - starshow-api/src/main/java/com/starshow/api/facade/UserFacade.java
+      - docker/mysql/init/01_schema.sql
+    sync_docs:
+      - docs/domains/01-user-reservation.md
+      - docs/contracts/API_CONTRACT.md
+      - docs/PROGRESS.md
+    prove_it_level: L1 + 集成实跑(一证一号/重复预约/黑名单拦截/短延迟提醒)
+
+  chain2_show_inventory:
+    title: 链路二 · 演出元数据、多级缓存与分区 Bitmap 选座
+    phase: Phase 2 (v0.3.0-chain2)
+    triggers: [演出, 场次, 票档, 余票, 多级缓存, Caffeine, L1, L2, 逻辑过期, 击穿, 穿透, 雪崩, Bitmap, 座位图, 选座, 预热, Preheat]
+    read_docs:
+      - docs/domains/02-show-inventory.md
+      - docs/contracts/API_CONTRACT.md
+    read_refs:
+      - .agents/skills/starshow/references/concurrency-consistency.md
+      - .agents/skills/starshow/references/storage-contracts.md
+    code_anchors:
+      - starshow-show/
+      - starshow-api/src/main/java/com/starshow/api/facade/ShowReadFacade.java
+      - starshow-common/src/main/java/com/starshow/common/constant/RedisKeys.java
+      - docker/mysql/init/02_seed.sql
+    sync_docs:
+      - docs/domains/02-show-inventory.md
+      - docs/contracts/API_CONTRACT.md
+      - docs/PROGRESS.md
+    prove_it_level: L1 + L2(布隆拦截零穿透/逻辑过期单线程重建/Bitmap 10x10 矩阵)
+
+  chain3_order_seckill:
+    title: 链路三 · V1→V4 抢票下单引擎、Lua 原子脚本与基因分表
+    phase: Phase 3 (v0.4.0-chain3)
+    triggers: [抢票, 秒杀, V1, V2, V3, V4, 策略模式, Lua, 事务消息, 半消息, 回查, 防悬挂, 墓碑, deduct_log, deduct_pending, 分片, 基因, Snowflake, 订单, active_flag, 行锁]
+    read_docs:
+      - docs/domains/03-order-seckill.md
+      - docs/contracts/API_CONTRACT.md
+    read_refs:
+      - .agents/skills/starshow/references/concurrency-consistency.md
+      - .agents/skills/starshow/references/storage-contracts.md
+      - .agents/skills/starshow/references/examples.md
+    code_anchors:
+      - starshow-order/
+      - starshow-order/src/main/resources/lua/seckill_deduct.lua
+      - starshow-order/src/main/resources/lua/seckill_seat_deduct.lua
+      - starshow-order/src/main/resources/lua/seckill_rollback.lua
+      - starshow-common/src/main/java/com/starshow/common/id/GeneSnowflakeIdGenerator.java
+      - starshow-common/src/main/java/com/starshow/common/statemachine/OrderStateMachine.java
+    sync_docs:
+      - docs/domains/03-order-seckill.md
+      - docs/contracts/API_CONTRACT.md
+      - docs/PROGRESS.md
+    prove_it_level: L1 + L2(200并发抢20张0超卖/连座冲突) + L3(事务回查补单与防悬挂墓碑)
+
+  chain4_payment_reconcile:
+    title: 链路四 · Mock 支付故障注入、关单竞速、出票、退款 Saga 与四方对账
+    phase: Phase 4 (v0.5.0-chain4)
+    triggers: [支付, Mock, 故障注入, 回调, 验签, 15分钟, 超时关单, 竞速, 查单, 滞后支付, 电子票, 出票, 退款, Saga, 对账, 长款, 短款, XXL-Job]
+    read_docs:
+      - docs/domains/04-payment-reconcile.md
+      - docs/contracts/API_CONTRACT.md
+    read_refs:
+      - .agents/skills/starshow/references/concurrency-consistency.md
+      - .agents/skills/starshow/references/examples.md
+    code_anchors:
+      - starshow-payment/
+      - starshow-order/
+      - starshow-common/src/main/java/com/starshow/common/statemachine/OrderStateMachine.java
+      - starshow-order/src/main/resources/lua/seckill_rollback.lua
+    sync_docs:
+      - docs/domains/04-payment-reconcile.md
+      - docs/contracts/API_CONTRACT.md
+      - docs/PROGRESS.md
+    prove_it_level: L1 + L3(六大魔鬼故障剧本全通过)
+
+  infra_common_api:
+    title: 公共底座、双形态启动、Docker 与契约调整
+    phase: 全周期
+    triggers: [common, api, Result, 错误码, TraceId, Jackson, Facade, monolith, boot-all, Docker, Compose, DDL, SQL, RocketMQ, Nacos, ADR]
+    read_docs:
+      - docs/ARCHITECTURE.md
+      - docs/adr/README.md
+    read_refs:
+      - .agents/skills/starshow/references/spring-boot-api.md
+      - .agents/skills/starshow/references/adr.md
+    code_anchors:
+      - pom.xml
+      - starshow-common/
+      - starshow-api/
+      - starshow-boot-all/
+      - docker/
+    sync_docs:
+      - docs/ARCHITECTURE.md
+      - docs/adr/README.md
+      - docs/PROGRESS.md
+    prove_it_level: L1(mvn clean test 全模块绿灯 + docker compose config 校验)
+
+  benchmark_ops:
+    title: V1→V4 压测实验与可观测大屏
+    phase: Phase 5 (v0.9.0-bench)
+    triggers: [压测, 基准测试, k6, JMeter, Token池, TPS, QPS, P99, E2E, 排空耗时, Prometheus, Grafana, Sentinel]
+    read_docs:
+      - docs/benchmarks/BENCHMARK_V1_TO_V4.md
+      - docs/domains/03-order-seckill.md
+    read_refs:
+      - .agents/skills/starshow/references/concurrency-consistency.md
+      - .agents/skills/prove-it/SKILL.md
+    code_anchors:
+      - load-test/
+      - docker/docker-compose.ops.yml
+      - docker/prometheus/prometheus.yml
+    sync_docs:
+      - docs/benchmarks/BENCHMARK_V1_TO_V4.md
+      - docs/PROGRESS.md
+    prove_it_level: L4(5000+ Token池实测 + V4 E2E 排空 + 零超卖零重复断言)
+
+  review_release:
+    title: 代码审查、实证验收、脱敏与发版
+    phase: 每次提交与里程碑发版
+    triggers: [验收, prove-it, review, 审查, 提交, commit, push, 脱敏, 发版, tag, README]
+    read_docs:
+      - docs/PROGRESS.md
+      - docs/README.md
+    read_refs:
+      - .agents/skills/prove-it/SKILL.md
+      - .agents/skills/starshow/references/review-checklist.md
+    code_anchors:
+      - .github/workflows/ci.yml
+      - .env.example
+      - .gitignore
+    sync_docs:
+      - docs/PROGRESS.md
+    prove_it_level: 全量 Prove-It 四步闭环 + 敏感词零命中扫描

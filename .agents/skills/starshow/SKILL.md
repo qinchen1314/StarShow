@@ -12,19 +12,24 @@ description: >-
 
 将本 Skill 视为 `starshow-ticket` 仓库的最高工程宪法。动手写代码前，先按**业务链路、分层归属、冷热数据域、并发/幂等影响面、验收证据级别**对需求进行分类。
 
-## 必读第一步（按需渐进式披露）
+## 必读第一步：O(1) 查字典精准路由（省注意力，禁止全仓乱翻）
 
-每次开始任务前，**必须先读** `references/core.md`。
+每次开始任务前，**严禁通读全部文档**，按以下 2 步直达目标：
 
-随后按任务类型**只按需加载**相关的参考文档（避免上下文膨胀）：
+1. **先查路由字典**：对照下表或读取 `docs/INDEX.yaml`（机器可读全量字典），用 1 秒命中本次任务对应的**唯一一条路由**；
+2. **只读命中的文件**：仅加载 `docs/PROGRESS.md`、`references/core.md` 以及命中路由指定的 `docs/domains/` 与 `references/`（通常只需 3~4 个文件）。
 
-- 高并发读/写演进、Lua 原子脚本、事务消息、关单竞速与退款 Saga：`references/concurrency-consistency.md`
-- MySQL 14 表契约、基因法 Snowflake、Redis Key Hash Tag、RocketMQ Topic：`references/storage-contracts.md`
-- Spring Boot 分层、单进程/微服务双形态 Facade、统一响应与 Maven 命令：`references/spring-boot-api.md`
-- ✅ / ❌ 正反代码范例（避坑速查）：`references/examples.md`
-- 架构决策记录（ADR 索引与规则冲突升级机制）：`references/adr.md`
-- 代码审查与开源脱敏检查清单：`references/review-checklist.md`
-- **所有代码改完后交付前（强制）**：加载并执行同级目录的 `prove-it` Skill（`../prove-it/SKILL.md`）
+| 任务关键词 / 板块 | 直达业务文档 (`docs/`) | 直达规则参考 (`references/`) | 改完必同步文档 | Prove-It 验收 |
+| --- | --- | --- | --- | --- |
+| **链路一**：登录/JWT黑名单/实名AES+HMAC/布隆预约/延迟提醒 | `docs/domains/01-user-reservation.md` + `docs/contracts/API_CONTRACT.md` | `spring-boot-api.md`、`storage-contracts.md`、`examples.md` | `01-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + 集成实跑 |
+| **链路二**：演出/L1+L2逻辑过期/分区Bitmap选座/Preheat预热 | `docs/domains/02-show-inventory.md` + `docs/contracts/API_CONTRACT.md` | `concurrency-consistency.md`、`storage-contracts.md` | `02-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + L2 |
+| **链路三**：V1~V4抢票/Lua预扣与连座/事务消息防悬挂/基因分表 | `docs/domains/03-order-seckill.md` + `docs/contracts/API_CONTRACT.md` | `concurrency-consistency.md`、`storage-contracts.md`、`examples.md` | `03-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + L2 + L3 |
+| **链路四**：Mock支付故障注入/15min关单竞速/出票/退款Saga/对账 | `docs/domains/04-payment-reconcile.md` + `docs/contracts/API_CONTRACT.md` | `concurrency-consistency.md`、`examples.md` | `04-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + L3 六剧本 |
+| **底座/基建**：common/api/Facade双形态/Docker/DDL/ADR冲突 | `docs/ARCHITECTURE.md` + `docs/adr/README.md` | `spring-boot-api.md`、`adr.md` | `ARCHITECTURE.md`、`adr/README.md`、`PROGRESS.md` | L1 全绿 |
+| **压测/可观测**：V1→V4对比/k6/JMeter/Token池/E2E排空/Grafana | `docs/benchmarks/BENCHMARK_V1_TO_V4.md` | `concurrency-consistency.md`、`../prove-it/SKILL.md` | `BENCHMARK_V1_TO_V4.md`、`PROGRESS.md` | L4 实测断言 |
+| **审查/发版**：验收/Code Review/脱敏/Commit/Tag | `docs/PROGRESS.md` + `docs/README.md` | `../prove-it/SKILL.md`、`review-checklist.md` | `PROGRESS.md` | 四步回执+脱敏 |
+
+> **所有代码改完后交付前（强制）**：加载并执行同级目录的 `prove-it` Skill（`../prove-it/SKILL.md`）。
 
 ## 编码前 9 问自检门禁
 

@@ -1,6 +1,8 @@
 # StarShow 文档治理中心（Single Source of Truth）
 
 > 目标：支撑长链路、跨多轮迭代与多模块协同开发，确保**代码、契约、架构决策与进度记忆始终对齐，不漂移、不失忆**。
+>
+> **O(1) 机器/人工路由总字典**：[docs/INDEX.yaml](./INDEX.yaml)（按关键词 1 秒定位 `read_docs`、`read_refs`、`code_anchors`、`sync_docs` 与 `prove_it_level`）。
 
 ---
 
