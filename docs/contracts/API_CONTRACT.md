@@ -26,13 +26,13 @@
 ### 链路一：鉴权、实名与预约 (`starshow-user`)
 | 方法与路径 | 说明 | 鉴权 | 状态 |
 | --- | --- | --- | --- |
-| `POST /api/v1/auth/register` | 手机号注册（BCrypt 密码哈希） | 公开 | Phase 1 |
-| `POST /api/v1/auth/login` | 登录签发 JWT（含 `jti`） | 公开 | Phase 1 |
-| `POST /api/v1/auth/logout` | 主动登出（`jti` 写入 Redis 黑名单） | 登录 | Phase 1 |
-| `POST /api/v1/users/identity` | 实名认证（AES-GCM 密文 + HMAC-SHA256 唯一防黄牛） | 登录 | Phase 1 |
-| `GET /api/v1/users/identity` | 查询脱敏实名状态 | 登录 | Phase 1 |
-| `POST /api/v1/reservations` | 场次预约（布隆过滤 + DB 唯一防重 + 计数 + MQ 延迟提醒） | 实名 | Phase 1 |
-| `GET /api/v1/reservations/{showId}/count` | 查询场次实时预约蓄水人数 | 公开 | Phase 1 |
+| `POST /api/v1/auth/register` | 手机号注册（`spring-security-crypto` BCrypt 哈希，`uk_phone` 防重） | 公开 | Phase 1 设计完成 |
+| `POST /api/v1/auth/login` | 登录签发 JWT（HS256，含 `sub`/`jti`/`exp`） | 公开 | Phase 1 设计完成 |
+| `POST /api/v1/auth/logout` | 主动登出（`jti` 写入 Redis 黑名单，TTL=剩余有效期） | 登录 | Phase 1 设计完成 |
+| `POST /api/v1/users/identity` | 实名认证（GB 11643 校验 + AES-GCM 密文 + HMAC-SHA256 唯一防黄牛） | 登录 | Phase 1 设计完成 |
+| `GET /api/v1/users/identity` | 查询脱敏实名状态（`3101**********1234`） | 登录 | Phase 1 设计完成 |
+| `POST /api/v1/reservations` | 场次预约（实名校验 + 布隆初筛防误杀 + DB 唯一防重 + 计数 + MQ 5.x 绝对时间延迟提醒） | 实名 | Phase 1 设计完成 |
+| `GET /api/v1/reservations/{showId}/count` | 查询场次实时预约蓄水人数（Redis 缺失自动回源 DB 回填） | 公开 | Phase 1 设计完成 |
 
 ### 链路二：演出、余票与选座 (`starshow-show`)
 | 方法与路径 | 说明 | 鉴权 | 状态 |

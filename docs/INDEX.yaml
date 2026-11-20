@@ -7,6 +7,8 @@ bootstrap:
   always_read_first:
     - docs/PROGRESS.md
     - .agents/skills/starshow/references/core.md
+  design_first_template:
+    - .agents/skills/starshow/references/design-spec-template.md
 
 routes:
   chain1_user_reservation:

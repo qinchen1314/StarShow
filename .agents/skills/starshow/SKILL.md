@@ -25,7 +25,7 @@ description: >-
 | **链路二**：演出/L1+L2逻辑过期/分区Bitmap选座/Preheat预热 | `docs/domains/02-show-inventory.md` + `docs/contracts/API_CONTRACT.md` | `concurrency-consistency.md`、`storage-contracts.md` | `02-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + L2 |
 | **链路三**：V1~V4抢票/Lua预扣与连座/事务消息防悬挂/基因分表 | `docs/domains/03-order-seckill.md` + `docs/contracts/API_CONTRACT.md` | `concurrency-consistency.md`、`storage-contracts.md`、`examples.md` | `03-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + L2 + L3 |
 | **链路四**：Mock支付故障注入/15min关单竞速/出票/退款Saga/对账 | `docs/domains/04-payment-reconcile.md` + `docs/contracts/API_CONTRACT.md` | `concurrency-consistency.md`、`examples.md` | `04-*.md`、`API_CONTRACT.md`、`PROGRESS.md` | L1 + L3 六剧本 |
-| **底座/基建**：common/api/Facade双形态/Docker/DDL/ADR冲突 | `docs/ARCHITECTURE.md` + `docs/adr/README.md` | `spring-boot-api.md`、`adr.md` | `ARCHITECTURE.md`、`adr/README.md`、`PROGRESS.md` | L1 全绿 |
+| **底座/基建**：common/api/Facade双形态/Docker/DDL/ADR冲突 | `docs/ARCHITECTURE.md` + `docs/adr/README.md` | `spring-boot-api.md`、`adr.md`、`design-spec-template.md` | `ARCHITECTURE.md`、`adr/README.md`、`PROGRESS.md` | L1 全绿 |
 | **压测/可观测**：V1→V4对比/k6/JMeter/Token池/E2E排空/Grafana | `docs/benchmarks/BENCHMARK_V1_TO_V4.md` | `concurrency-consistency.md`、`../prove-it/SKILL.md` | `BENCHMARK_V1_TO_V4.md`、`PROGRESS.md` | L4 实测断言 |
 | **审查/发版**：验收/Code Review/脱敏/Commit/Tag | `docs/PROGRESS.md` + `docs/README.md` | `../prove-it/SKILL.md`、`review-checklist.md` | `PROGRESS.md` | 四步回执+脱敏 |
 
@@ -59,15 +59,22 @@ description: >-
 - 严禁将任何真实密码、密钥、个人邮箱、本机绝对路径或代理配置提交至 Git 仓库。
 - 严禁跳过 `prove-it` 验收直接宣称任务完成，严禁弱化或删除已有测试断言来换取假绿灯。
 
-## 标准开发与验收工作流
+## 标准开发与验收工作流（Design-First → 编码 → Prove-It 闭环）
 
-1. 阅读 `references/core.md`、`docs/PROGRESS.md`（恢复当前阶段进度）及目标板块的 `docs/domains/0x-*.md` 与对应参考文档。
-2. 审阅现有代码与 `docs/ARCHITECTURE.md`，通过编码前 9 问自检门禁。
-3. 严格按分层落地实现（Controller → Application Service / Strategy → Domain/StateMachine → Infrastructure Mapper/Lua/MQ）。
-4. 编写与风险等级相匹配的测试（单测 / 并发零超卖 / 故障注入剧本）。
-5. **文档治理同步（Docs-as-Code）**：按 `docs/README.md` 映射矩阵同步更新对应的 `docs/domains/0x-*.md`、`docs/contracts/API_CONTRACT.md` 与 `docs/PROGRESS.md`（若涉及规则变更，补录 `docs/adr/`）。
-6. **激活 `prove-it` Skill**：实跑测试与运行时验证、检查 `git diff`（防测试弱化 + 文档同步 + 脱敏扫描）、输出结构化《实证验收回执》。
-7. 对照 `references/review-checklist.md` 完成最终自查后交付。
+所有新链路、新阶段（Phase 1~6）或重大功能开发，**必须严格分为两个阶段执行，严禁跳过设计直接盲写代码**：
+
+### 阶段 A：成熟方案调研与规格书先行（Design-First Gate）
+1. **O(1) 查字典**：读 `docs/INDEX.yaml` 命中唯一路由，加载 `docs/PROGRESS.md`、`references/core.md`、`references/design-spec-template.md` 及对应参考文档。
+2. **成熟方案调研**：针对本板块核心技术点，优先检索并验证行业成熟方案、现成生态组件 API 与安全/并发最佳实践（能复用成熟库/模式绝不重复造轮子）。
+3. **编写完整板块开发文档**：严格按 `references/design-spec-template.md` 的 7 大章节完善 `docs/domains/0x-*.md`（涵盖：方案调研与化用、端到端链路与节点拆解、业务与技术细节、精确契约、异常与降级、**跨板块影响矩阵**、**Prove-It 验收用例**），并同步补全 `docs/contracts/API_CONTRACT.md`。
+4. **拍板确认门禁**：提交规格书供评审确认；**未确认设计文档前，不得直接启动业务编码**（小修小补 Bugfix 除外）。
+
+### 阶段 B：按规格书编码与 Prove-It 实证验收
+5. **编码前 9 问自检**：切出功能分支 `feat/<module>-<desc>`，对照规格书与编码前 9 问自检门禁。
+6. **分层落地实现**：严格按 Controller → Application Service / Strategy → Domain/StateMachine → Infrastructure 落地，并编写覆盖规格书全部验收用例的测试。
+7. **文档治理同步（Docs-as-Code）**：如实现期有契约微调，同步回写 `docs/domains/0x-*.md`、`docs/contracts/API_CONTRACT.md` 与 `docs/PROGRESS.md`（规则冲突补录 `docs/adr/`）。
+8. **激活 `prove-it` Skill**：实跑测试与运行态验证、检查 `git diff`（防测试弱化 + 文档同步 + 脱敏扫描）、输出结构化《实证验收回执》。
+9. **最终复查与交付**：对照 `references/review-checklist.md` 自查无误后合并并打阶段 Tag。
 
 ## 全链路演进蓝图
 
