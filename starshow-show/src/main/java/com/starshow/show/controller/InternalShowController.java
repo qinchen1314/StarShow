@@ -2,6 +2,7 @@ package com.starshow.show.controller;
 
 import com.starshow.api.dto.ShowBasicDTO;
 import com.starshow.api.dto.TierSnapshotDTO;
+import com.starshow.api.dto.ZoneSeatSpecDTO;
 import com.starshow.api.facade.ShowReadFacade;
 import com.starshow.common.auth.AuthHeaders;
 import com.starshow.common.config.StarShowSecurityProperties;
@@ -60,6 +61,19 @@ public class InternalShowController {
             throw new BizException(ErrorCode.TIER_NOT_FOUND);
         }
         return Result.ok(snapshot);
+    }
+
+    @GetMapping("/{showId}/zones/{zoneId}/seats/spec")
+    public Result<ZoneSeatSpecDTO> getZoneSeatSpec(
+            @PathVariable("showId") long showId,
+            @PathVariable("zoneId") String zoneId,
+            @RequestHeader(value = AuthHeaders.X_INTERNAL_GATEWAY_SECRET, required = false) String secret) {
+        verifyInternalSecret(secret);
+        ZoneSeatSpecDTO spec = showReadFacade.getZoneSeatSpec(showId, zoneId);
+        if (spec == null) {
+            throw new BizException(ErrorCode.SHOW_NOT_FOUND, "分区座位配置不存在");
+        }
+        return Result.ok(spec);
     }
 
     @PutMapping("/{showId}/schedule")

@@ -28,6 +28,24 @@ starshow:
   seckill:
     # 动态切换抢票演进策略：V1 | V2 | V3 | V4
     strategy: ${STARSHOW_SECKILL_STRATEGY:V4}
+    token-ttl-seconds: ${STARSHOW_SECKILL_TOKEN_TTL_SECONDS:60}
+    request-ttl-seconds: ${STARSHOW_SECKILL_REQUEST_TTL_SECONDS:1800}
+    request-lease-ms: ${STARSHOW_SECKILL_REQUEST_LEASE_MS:15000}
+    poll-initial-ms: ${STARSHOW_SECKILL_POLL_INITIAL_MS:500}
+    poll-max-ms: ${STARSHOW_SECKILL_POLL_MAX_MS:3000}
+    poll-max-attempts: ${STARSHOW_SECKILL_POLL_MAX_ATTEMPTS:30}
+    deduct-proof-ttl-seconds: ${STARSHOW_SECKILL_DEDUCT_PROOF_TTL_SECONDS:86400}
+    pending-min-age-seconds: ${STARSHOW_SECKILL_PENDING_MIN_AGE_SECONDS:300}
+    order-expire-minutes: ${STARSHOW_SECKILL_ORDER_EXPIRE_MINUTES:15}
+    lock-wait-ms: ${STARSHOW_SECKILL_LOCK_WAIT_MS:3000}
+    lock-lease-ms: ${STARSHOW_SECKILL_LOCK_LEASE_MS:10000}
+    order-consumer-concurrency: ${STARSHOW_SECKILL_ORDER_CONSUMER_CONCURRENCY:4}
+    per-tier-consumer-concurrency: ${STARSHOW_SECKILL_PER_TIER_CONSUMER_CONCURRENCY:1}
+    mq-enabled: ${STARSHOW_SECKILL_MQ_ENABLED:true}
+    timeout-dispatch-enabled: ${STARSHOW_SECKILL_TIMEOUT_DISPATCH_ENABLED:true}
+    timeout-dispatch-interval-ms: ${STARSHOW_SECKILL_TIMEOUT_DISPATCH_INTERVAL_MS:10000}
+    pending-reconcile-enabled: ${STARSHOW_SECKILL_PENDING_RECONCILE_ENABLED:true}
+    pending-reconcile-interval-ms: ${STARSHOW_SECKILL_PENDING_RECONCILE_INTERVAL_MS:300000}
   security:
     # 所有安全密钥严禁回退仓库公开默认值，必须通过环境变量注入
     jwt-secret: ${STARSHOW_JWT_SECRET:}

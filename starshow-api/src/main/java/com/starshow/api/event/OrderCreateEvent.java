@@ -27,4 +27,10 @@ public class OrderCreateEvent implements Serializable {
     private Integer qty;
     private Long amountCent;
     private Long deductEpochSec;
+    private String clientRequestId;
+    private String requestFingerprint;
+    private Integer saleConfigVersion;
+    private String layoutVersion;
+    private String strategy;
+    private String traceId;
 }

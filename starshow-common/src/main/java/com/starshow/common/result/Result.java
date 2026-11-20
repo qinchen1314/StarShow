@@ -54,10 +54,18 @@ public class Result<T> implements Serializable {
     }
 
     public static <T> Result<T> fail(String code, String message) {
+        return fail(code, message, null);
+    }
+
+    public static <T> Result<T> fail(ErrorCode errorCode, String detailMessage, T data) {
+        return fail(errorCode.getCode(), detailMessage, data);
+    }
+
+    public static <T> Result<T> fail(String code, String message, T data) {
         return new Result<>(
                 code,
                 message,
-                null,
+                data,
                 TraceIdContext.get(),
                 System.currentTimeMillis()
         );

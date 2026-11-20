@@ -1,0 +1,67 @@
+server:
+  port: 8003
+
+spring:
+  application:
+    name: starshow-order
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:starshow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: pg-starshow-order
+
+starshow:
+  worker-id: ${STARSHOW_WORKER_ID:3}
+  services:
+    user-uri: ${USER_SERVICE_URI:http://127.0.0.1:8001}
+    show-uri: ${SHOW_SERVICE_URI:http://127.0.0.1:8002}
+  feign:
+    connect-timeout-ms: ${STARSHOW_FEIGN_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${STARSHOW_FEIGN_READ_TIMEOUT_MS:5000}
+  security:
+    # 严禁回退公开默认值，必须通过环境变量注入
+    internal-gateway-secret: ${STARSHOW_INTERNAL_GATEWAY_SECRET:}
+  seckill:
+    strategy: ${STARSHOW_SECKILL_STRATEGY:V4}
+    token-ttl-seconds: ${STARSHOW_SECKILL_TOKEN_TTL_SECONDS:60}
+    request-ttl-seconds: ${STARSHOW_SECKILL_REQUEST_TTL_SECONDS:1800}
+    request-lease-ms: ${STARSHOW_SECKILL_REQUEST_LEASE_MS:15000}
+    poll-initial-ms: ${STARSHOW_SECKILL_POLL_INITIAL_MS:500}
+    poll-max-ms: ${STARSHOW_SECKILL_POLL_MAX_MS:3000}
+    poll-max-attempts: ${STARSHOW_SECKILL_POLL_MAX_ATTEMPTS:30}
+    deduct-proof-ttl-seconds: ${STARSHOW_SECKILL_DEDUCT_PROOF_TTL_SECONDS:86400}
+    pending-min-age-seconds: ${STARSHOW_SECKILL_PENDING_MIN_AGE_SECONDS:300}
+    order-expire-minutes: ${STARSHOW_SECKILL_ORDER_EXPIRE_MINUTES:15}
+    lock-wait-ms: ${STARSHOW_SECKILL_LOCK_WAIT_MS:3000}
+    lock-lease-ms: ${STARSHOW_SECKILL_LOCK_LEASE_MS:10000}
+    order-consumer-concurrency: ${STARSHOW_SECKILL_ORDER_CONSUMER_CONCURRENCY:4}
+    per-tier-consumer-concurrency: ${STARSHOW_SECKILL_PER_TIER_CONSUMER_CONCURRENCY:1}
+    mq-enabled: ${STARSHOW_SECKILL_MQ_ENABLED:true}
+    timeout-dispatch-enabled: ${STARSHOW_SECKILL_TIMEOUT_DISPATCH_ENABLED:true}
+    timeout-dispatch-interval-ms: ${STARSHOW_SECKILL_TIMEOUT_DISPATCH_INTERVAL_MS:10000}
+    pending-reconcile-enabled: ${STARSHOW_SECKILL_PENDING_RECONCILE_ENABLED:true}
+    pending-reconcile-interval-ms: ${STARSHOW_SECKILL_PENDING_RECONCILE_INTERVAL_MS:300000}
+
+mybatis-plus:
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

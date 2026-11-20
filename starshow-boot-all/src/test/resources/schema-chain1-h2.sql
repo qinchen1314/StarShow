@@ -134,6 +134,147 @@ CREATE TABLE IF NOT EXISTS t_show_task (
     CONSTRAINT uk_show_task_version UNIQUE (show_id, task_type, version)
 );
 
+CREATE TABLE IF NOT EXISTS t_order_0 (
+    order_no            BIGINT       NOT NULL,
+    user_id             BIGINT       NOT NULL,
+    show_id             BIGINT       NOT NULL,
+    tier_id             BIGINT       NOT NULL,
+    zone_id             VARCHAR(32)  NULL,
+    seat_indices        VARCHAR(128) NULL,
+    qty                 INT          NOT NULL DEFAULT 1,
+    amount_cent         BIGINT       NOT NULL,
+    status              VARCHAR(24)  NOT NULL,
+    active_flag         BIGINT       NOT NULL DEFAULT 1,
+    request_id          CHAR(36)     NULL,
+    request_fingerprint CHAR(64)     NULL,
+    sale_config_version INT          NOT NULL DEFAULT 1,
+    layout_version      VARCHAR(32)  NULL,
+    seckill_strategy    VARCHAR(16)  NOT NULL DEFAULT 'V4',
+    pay_trade_no        VARCHAR(64)  NULL,
+    close_reason        VARCHAR(64)  NULL,
+    expire_time         TIMESTAMP    NOT NULL,
+    paid_time           TIMESTAMP    NULL,
+    deleted             TINYINT      NOT NULL DEFAULT 0,
+    create_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (order_no),
+    CONSTRAINT uk_user_show_active_0 UNIQUE (user_id, show_id, active_flag),
+    CONSTRAINT uk_user_show_request_0 UNIQUE (user_id, show_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_order_1 (
+    order_no            BIGINT       NOT NULL,
+    user_id             BIGINT       NOT NULL,
+    show_id             BIGINT       NOT NULL,
+    tier_id             BIGINT       NOT NULL,
+    zone_id             VARCHAR(32)  NULL,
+    seat_indices        VARCHAR(128) NULL,
+    qty                 INT          NOT NULL DEFAULT 1,
+    amount_cent         BIGINT       NOT NULL,
+    status              VARCHAR(24)  NOT NULL,
+    active_flag         BIGINT       NOT NULL DEFAULT 1,
+    request_id          CHAR(36)     NULL,
+    request_fingerprint CHAR(64)     NULL,
+    sale_config_version INT          NOT NULL DEFAULT 1,
+    layout_version      VARCHAR(32)  NULL,
+    seckill_strategy    VARCHAR(16)  NOT NULL DEFAULT 'V4',
+    pay_trade_no        VARCHAR(64)  NULL,
+    close_reason        VARCHAR(64)  NULL,
+    expire_time         TIMESTAMP    NOT NULL,
+    paid_time           TIMESTAMP    NULL,
+    deleted             TINYINT      NOT NULL DEFAULT 0,
+    create_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (order_no),
+    CONSTRAINT uk_user_show_active_1 UNIQUE (user_id, show_id, active_flag),
+    CONSTRAINT uk_user_show_request_1 UNIQUE (user_id, show_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_order_2 (
+    order_no            BIGINT       NOT NULL,
+    user_id             BIGINT       NOT NULL,
+    show_id             BIGINT       NOT NULL,
+    tier_id             BIGINT       NOT NULL,
+    zone_id             VARCHAR(32)  NULL,
+    seat_indices        VARCHAR(128) NULL,
+    qty                 INT          NOT NULL DEFAULT 1,
+    amount_cent         BIGINT       NOT NULL,
+    status              VARCHAR(24)  NOT NULL,
+    active_flag         BIGINT       NOT NULL DEFAULT 1,
+    request_id          CHAR(36)     NULL,
+    request_fingerprint CHAR(64)     NULL,
+    sale_config_version INT          NOT NULL DEFAULT 1,
+    layout_version      VARCHAR(32)  NULL,
+    seckill_strategy    VARCHAR(16)  NOT NULL DEFAULT 'V4',
+    pay_trade_no        VARCHAR(64)  NULL,
+    close_reason        VARCHAR(64)  NULL,
+    expire_time         TIMESTAMP    NOT NULL,
+    paid_time           TIMESTAMP    NULL,
+    deleted             TINYINT      NOT NULL DEFAULT 0,
+    create_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (order_no),
+    CONSTRAINT uk_user_show_active_2 UNIQUE (user_id, show_id, active_flag),
+    CONSTRAINT uk_user_show_request_2 UNIQUE (user_id, show_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_order_3 (
+    order_no            BIGINT       NOT NULL,
+    user_id             BIGINT       NOT NULL,
+    show_id             BIGINT       NOT NULL,
+    tier_id             BIGINT       NOT NULL,
+    zone_id             VARCHAR(32)  NULL,
+    seat_indices        VARCHAR(128) NULL,
+    qty                 INT          NOT NULL DEFAULT 1,
+    amount_cent         BIGINT       NOT NULL,
+    status              VARCHAR(24)  NOT NULL,
+    active_flag         BIGINT       NOT NULL DEFAULT 1,
+    request_id          CHAR(36)     NULL,
+    request_fingerprint CHAR(64)     NULL,
+    sale_config_version INT          NOT NULL DEFAULT 1,
+    layout_version      VARCHAR(32)  NULL,
+    seckill_strategy    VARCHAR(16)  NOT NULL DEFAULT 'V4',
+    pay_trade_no        VARCHAR(64)  NULL,
+    close_reason        VARCHAR(64)  NULL,
+    expire_time         TIMESTAMP    NOT NULL,
+    paid_time           TIMESTAMP    NULL,
+    deleted             TINYINT      NOT NULL DEFAULT 0,
+    create_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (order_no),
+    CONSTRAINT uk_user_show_active_3 UNIQUE (user_id, show_id, active_flag),
+    CONSTRAINT uk_user_show_request_3 UNIQUE (user_id, show_id, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS t_mq_consume_log (
+    msg_key        VARCHAR(96) NOT NULL,
+    topic          VARCHAR(64) NOT NULL,
+    user_id        BIGINT      NOT NULL DEFAULT 0,
+    biz_no         VARCHAR(64) NOT NULL,
+    consume_status TINYINT     NOT NULL DEFAULT 1,
+    create_time    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (msg_key)
+);
+
+CREATE TABLE IF NOT EXISTS t_order_action (
+    action_id       BIGINT        NOT NULL,
+    order_no        BIGINT        NOT NULL,
+    user_id         BIGINT        NOT NULL,
+    show_id         BIGINT        NOT NULL,
+    action_type     VARCHAR(32)   NOT NULL,
+    status          VARCHAR(24)   NOT NULL DEFAULT 'PENDING',
+    payload_json    VARCHAR(1024) NULL,
+    next_retry_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lease_until     TIMESTAMP     NULL,
+    attempt         INT           NOT NULL DEFAULT 0,
+    last_error_code VARCHAR(32)   NULL,
+    deleted         TINYINT       NOT NULL DEFAULT 0,
+    create_time     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (action_id),
+    CONSTRAINT uk_order_action_type UNIQUE (order_no, action_type)
+);
+
 INSERT INTO t_show (id, title, artist, city, venue, show_time, sale_start_time, sale_end_time, sale_status, seat_mode, poster_url, description)
 VALUES (10003, '星演跨年盛典 · 预约蓄水专场', 'StarShow Special', '深圳', '深圳湾体育中心',
         TIMESTAMPADD(DAY, 31, CURRENT_TIMESTAMP),

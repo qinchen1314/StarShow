@@ -166,27 +166,33 @@ CREATE TABLE IF NOT EXISTS `t_show_task` (
 -- 3. 订单与履约域 (starshow-order) - 按 user_id 基因分 4 表
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `t_order_0` (
-    `order_no`      BIGINT       NOT NULL COMMENT '基因法Snowflake订单号（尾4bit=user_id%16）',
-    `user_id`       BIGINT       NOT NULL COMMENT '用户ID（分片键）',
-    `show_id`       BIGINT       NOT NULL COMMENT '演出场次ID',
-    `tier_id`       BIGINT       NOT NULL COMMENT '票档ID',
-    `zone_id`       VARCHAR(32)  NULL COMMENT '选座区域ID（自动配座可空）',
-    `seat_indices`  VARCHAR(128) NULL COMMENT '选座Bitmap偏移逗号分隔（如 12,13）',
-    `qty`           INT          NOT NULL DEFAULT 1 COMMENT '购买张数',
-    `amount_cent`   BIGINT       NOT NULL COMMENT '实付金额（分）',
-    `status`        VARCHAR(24)  NOT NULL COMMENT 'WAIT_PAY/PAID/TICKETED/CLOSED/REFUNDING/REFUNDED',
-    `active_flag`   BIGINT       NOT NULL DEFAULT 1 COMMENT '有效单=1；关单/退款后置为order_no以允许合法重抢',
-    `pay_trade_no`  VARCHAR(64)  NULL COMMENT '支付渠道交易号',
-    `close_reason`  VARCHAR(64)  NULL COMMENT '关单原因',
-    `expire_time`   DATETIME     NOT NULL COMMENT '订单超时时间(创建+15min)',
-    `paid_time`     DATETIME     NULL COMMENT '支付完成时间',
-    `deleted`       TINYINT      NOT NULL DEFAULT 0,
-    `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `order_no`            BIGINT       NOT NULL COMMENT '基因法Snowflake订单号（尾4bit=user_id%16）',
+    `user_id`             BIGINT       NOT NULL COMMENT '用户ID（分片键）',
+    `show_id`             BIGINT       NOT NULL COMMENT '演出场次ID',
+    `tier_id`             BIGINT       NOT NULL COMMENT '票档ID',
+    `zone_id`             VARCHAR(32)  NULL COMMENT '选座区域ID（自动配座可空）',
+    `seat_indices`        VARCHAR(128) NULL COMMENT '选座Bitmap偏移逗号分隔（如 12,13）',
+    `qty`                 INT          NOT NULL DEFAULT 1 COMMENT '购买张数',
+    `amount_cent`         BIGINT       NOT NULL COMMENT '实付金额（分）',
+    `status`              VARCHAR(24)  NOT NULL COMMENT 'WAIT_PAY/PAID/TICKETED/CLOSED/REFUNDING/REFUNDED',
+    `active_flag`         BIGINT       NOT NULL DEFAULT 1 COMMENT '有效单=1；关单/退款后置为order_no以允许合法重抢',
+    `request_id`          CHAR(36)     NULL COMMENT '客户端幂等请求UUID',
+    `request_fingerprint` CHAR(64)     NULL COMMENT '请求参数SHA-256摘要',
+    `sale_config_version` INT          NOT NULL DEFAULT 1 COMMENT '下单时开售配置版本号',
+    `layout_version`      VARCHAR(32)  NULL COMMENT '自主选座布局版本号',
+    `seckill_strategy`    VARCHAR(16)  NOT NULL DEFAULT 'V4' COMMENT '下单策略 V1/V2/V3/V4',
+    `pay_trade_no`        VARCHAR(64)  NULL COMMENT '支付渠道交易号',
+    `close_reason`        VARCHAR(64)  NULL COMMENT '关单原因',
+    `expire_time`         DATETIME     NOT NULL COMMENT '订单超时时间(创建+15min)',
+    `paid_time`           DATETIME     NULL COMMENT '支付完成时间',
+    `deleted`             TINYINT      NOT NULL DEFAULT 0,
+    `create_time`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`order_no`),
     UNIQUE KEY `uk_user_show_active` (`user_id`, `show_id`, `active_flag`),
+    UNIQUE KEY `uk_user_show_request` (`user_id`, `show_id`, `request_id`),
     KEY `idx_status_expire` (`status`, `expire_time`),
-    KEY `idx_user_create` (`user_id`, `create_time`)
+    KEY `idx_user_create` (`user_id`, `create_time`, `order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单分表 0';
 
 CREATE TABLE IF NOT EXISTS `t_order_1` LIKE `t_order_0`;
@@ -230,6 +236,27 @@ CREATE TABLE IF NOT EXISTS `t_mq_consume_log` (
     PRIMARY KEY (`msg_key`),
     KEY `idx_biz_no` (`biz_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MQ消费幂等表（与业务落单同事务）';
+
+CREATE TABLE IF NOT EXISTS `t_order_action` (
+    `action_id`       BIGINT        NOT NULL COMMENT '动作ID(Snowflake)',
+    `order_no`        BIGINT        NOT NULL COMMENT '关联订单号',
+    `user_id`         BIGINT        NOT NULL COMMENT '用户ID（分库演进时随user_id路由）',
+    `show_id`         BIGINT        NOT NULL COMMENT '演出场次ID',
+    `action_type`     VARCHAR(32)   NOT NULL COMMENT 'CREATE_DECISION/CLOSE_CHECK/RELEASE_STOCK',
+    `status`          VARCHAR(24)   NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/APPLIED/REJECTED/SENT/DONE/FAILED',
+    `payload_json`    VARCHAR(1024) NULL COMMENT '动作上下文JSON',
+    `next_retry_at`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次可调度时间',
+    `lease_until`     DATETIME      NULL COMMENT '当前执行租约截止时间',
+    `attempt`         INT           NOT NULL DEFAULT 0 COMMENT '已尝试次数',
+    `last_error_code` VARCHAR(32)   NULL COMMENT '最近错误码',
+    `deleted`         TINYINT       NOT NULL DEFAULT 0,
+    `create_time`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time`     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`action_id`),
+    UNIQUE KEY `uk_order_action_type` (`order_no`, `action_type`),
+    KEY `idx_action_schedule` (`status`, `next_retry_at`, `action_id`),
+    KEY `idx_show_type_status` (`show_id`, `action_type`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单异步动作、超时关单与创单裁决恢复表';
 
 -- ----------------------------------------------------------------------------
 -- 4. 支付、退款 Saga 与四方对账域 (starshow-payment)

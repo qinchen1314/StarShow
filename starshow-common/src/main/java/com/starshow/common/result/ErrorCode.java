@@ -37,6 +37,8 @@ public enum ErrorCode {
     ORDER_NOT_FOUND("A0304", "订单不存在"),
     ORDER_STATE_ILLEGAL("A0305", "订单状态不允许当前操作"),
     DEDUCT_REJECTED_BY_TOMBSTONE("A0306", "该笔预扣请求已超时作废，请重新发起"),
+    REQUEST_CONFLICT("A0307", "同一请求标识携带了不一致的下单参数"),
+    PRICE_CHANGED("A0308", "票档价格已发生变化，请确认最新价格后重新提交"),
 
     // 支付与退款 (A04xx)
     PAYMENT_NOT_FOUND("A0401", "支付单不存在"),

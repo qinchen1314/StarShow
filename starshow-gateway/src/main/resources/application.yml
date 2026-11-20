@@ -38,6 +38,13 @@ management:
         include: health,info,prometheus
 
 starshow:
+  gateway:
+    seckill-rate-limit:
+      enabled: ${STARSHOW_GW_SECKILL_RL_ENABLED:true}
+      user-limit: ${STARSHOW_GW_SECKILL_RL_USER_LIMIT:20}
+      show-limit: ${STARSHOW_GW_SECKILL_RL_SHOW_LIMIT:5000}
+      window-seconds: ${STARSHOW_GW_SECKILL_RL_WINDOW_SECONDS:1}
+      redis-timeout-ms: ${STARSHOW_GW_SECKILL_RL_TIMEOUT_MS:300}
   security:
     # 严禁回退公开默认值，必须通过环境变量注入
     jwt-secret: ${STARSHOW_JWT_SECRET:}

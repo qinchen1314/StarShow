@@ -66,6 +66,10 @@ public final class RedisKeys {
         return "starshow:seat:layout:{" + showId + "}:" + zoneId;
     }
 
+    public static String seatStaticLayout(long showId, String zoneId, int layoutVersion) {
+        return "starshow:seat:static_layout:{" + showId + "}:" + zoneId + ":v" + layoutVersion;
+    }
+
     // ---------- 抢票核心原子集群（链路三，全部共享 {showId} Hash Tag） ----------
 
     public static String stock(long showId, long tierId) {
@@ -102,9 +106,33 @@ public final class RedisKeys {
         return "starshow:lock:order:" + orderNo;
     }
 
-    // ---------- 入口防重 Token ----------
+    // ---------- 入口防重 Token 与链路三请求绑定/限流（共享 {showId} Hash Tag） ----------
 
     public static String seckillToken(long userId, long showId, String token) {
         return "starshow:token:{" + showId + "}:" + userId + ":" + token;
+    }
+
+    public static String seckillReq(long showId, long userId, String clientRequestId) {
+        return "starshow:seckill:req:{" + showId + "}:" + userId + ":" + clientRequestId;
+    }
+
+    public static String seckillAttempt(long showId, long orderNo) {
+        return "starshow:seckill:attempt:{" + showId + "}:" + orderNo;
+    }
+
+    public static String seckillSubmitPending(long showId) {
+        return "starshow:seckill:submit_pending:{" + showId + "}";
+    }
+
+    public static String boughtOwner(long showId) {
+        return "starshow:bought_owner:{" + showId + "}";
+    }
+
+    public static String seckillRateLimitUser(long userId, String pathTag) {
+        return "starshow:rl:seckill:u:" + userId + ":" + pathTag;
+    }
+
+    public static String seckillRateLimitShow(long showId) {
+        return "starshow:rl:seckill:{" + showId + "}:show";
     }
 }

@@ -45,8 +45,15 @@ class CryptoAndRedisKeysTest {
                 RedisKeys.rollbackDone(showId, orderNo),
                 RedisKeys.seatBitmap(showId, "HALL_A"),
                 RedisKeys.seatLayout(showId, "HALL_A"),
+                RedisKeys.seatStaticLayout(showId, "HALL_A", 1),
                 RedisKeys.showReady(showId),
-                RedisKeys.showOpLock(showId)
+                RedisKeys.showOpLock(showId),
+                RedisKeys.seckillToken(42L, showId, "tok-abc"),
+                RedisKeys.seckillReq(showId, 42L, "req-uuid-1"),
+                RedisKeys.seckillAttempt(showId, orderNo),
+                RedisKeys.seckillSubmitPending(showId),
+                RedisKeys.boughtOwner(showId),
+                RedisKeys.seckillRateLimitShow(showId)
         );
 
         String expectedTag = "{" + showId + "}";

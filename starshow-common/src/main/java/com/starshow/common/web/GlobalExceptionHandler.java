@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BizException.class)
-    public ResponseEntity<Result<Void>> handleBizException(BizException ex) {
+    public ResponseEntity<Result<Object>> handleBizException(BizException ex) {
         ErrorCode code = ex.getErrorCode();
         HttpStatus status = ex.getHttpStatus() != null
                 ? HttpStatus.valueOf(ex.getHttpStatus())
@@ -43,7 +43,7 @@ public class GlobalExceptionHandler {
             builder.header("Retry-After", String.valueOf(retryAfterSec));
             builder.header("X-Retry-After-Ms", String.valueOf(ex.getRetryAfterMs()));
         }
-        return builder.body(Result.fail(code, ex.getMessage()));
+        return builder.body(Result.fail(code, ex.getMessage(), ex.getData()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -89,7 +89,7 @@ public class GlobalExceptionHandler {
         if (code == ErrorCode.TOO_MANY_REQUESTS) {
             return HttpStatus.TOO_MANY_REQUESTS;
         }
-        if (code == ErrorCode.STOCK_UNAVAILABLE) {
+        if (code == ErrorCode.STOCK_UNAVAILABLE || code == ErrorCode.MQ_SEND_FAILED) {
             return HttpStatus.SERVICE_UNAVAILABLE;
         }
         if (code == ErrorCode.SYSTEM_ERROR) {

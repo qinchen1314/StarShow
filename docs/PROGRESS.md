@@ -10,8 +10,8 @@
 | --- | --- | --- | --- | --- |
 | **Phase 0** | `v0.1.0-infra` | ✅ 已完成并上云 | 多模块骨架、Docker 分层栈、MySQL 14 表 DDL+Seed、3 套 Lua 契约、`starshow-common` 底座、项目级 Skills 与文档治理 | L1 全绿（9/9 编译，6/6 单测，脱敏 0 命中） |
 | **Phase 1** | `v0.2.0-chain1`（待打） | ✅ 已完成（含 Phase 1.1 优化全绿） | 链路一：JWT 黑名单、AES+HMAC 实名防黄牛、布隆预约蓄水、有界收敛+SingleFlight 计数、RocketMQ 5.x 延迟提醒、站内通知同事务落账、主办方改期版本联动、我的预约与实名前置引导、双形态 OpenFeign | 全绿（9/9 编译，59/59 常规测试，5/5 真实 Docker 中间件并发/故障/改期/SingleFlight 测试，双形态原包隔离 E2E + 两进程中断恢复 + 哨兵完好 + 脱敏 0 命中；`ISSUE-001`~`010` 全部关闭）。见 [Phase 1.1 实证回执](./issues/ISSUE-007-chain1-acceptance-evidence.md#2026-11-20-链路一深度优化phase-11实证回执)。 |
-| **Phase 2** | `v0.3.0-chain2`（待打） | ✅ 已完成 | 链路二：稳定游标浏览、Caffeine L1 + Redis L2 逻辑过期多级缓存、布隆目录防穿透、分区 Bitmap MSB 选座、Fencing Token 版本化预热、安全改期跨链路联动与毫秒级开售门禁 | 全绿（9/9 编译，74/74 常规测试，10/10 真实 Docker 中间件测试〔链路二 5/5 + 链路一 5/5〕，双形态原始发行包隔离 E2E `monolith` + `distributed` 全绿，默认库与 Redis DB 0 哨兵 100% 完好，脱敏 0 命中）。见 [链路二规格书与实测记录](./domains/02-show-inventory.md#phase-2-实证验收结果2026-11-20)。 |
-| **Phase 3** | `v0.4.0-chain3` | ⬜ 未开始 | 链路三：V1→V4 策略抢票引擎、Lua 预扣/选座、RocketMQ 事务消息防悬挂回查、基因分表 | 待验收 |
+| **Phase 2** | `v0.3.0-chain2`（待打） | ✅ 已完成（含复验 4 项 P1 闭环） | 链路二：稳定游标浏览、Caffeine L1 + Redis L2 逻辑过期多级缓存、布隆目录防穿透、版本化静态座位图 + 分区 Bitmap MSB 选座、Fencing Token 版本化预热、改期同事务待办恢复、毫秒级开售门禁与存量库无损升级 | 全绿（9/9 编译，75+ 常规测试，12/12 真实 Docker 中间件测试〔链路二 7/7 + 链路一 5/5〕，Phase 1 存量库 `V2` 无损升级实跑 + 双形态原始发行包隔离 E2E `monolith` + `distributed` 全绿，默认库与 Redis DB 0 哨兵 100% 完好，脱敏 0 命中）。见 [链路二规格书与实测记录](./domains/02-show-inventory.md#phase-2-实证验收结果2026-11-20)。 |
+| **Phase 3** | `v0.4.0-chain3`（待打） | ✅ 已完成 | 链路三：抢票准入与短时 Token、两段式请求绑定与换设备找回、V1→V4 策略抢票引擎、Lua 原子预扣/连座锁座与门禁校验、RocketMQ 5.x 事务消息防悬挂回查、基因分表三层幂等落单、超时关单任务落账与网关限流 | 全绿（9/9 编译，88/88 常规测试，5/5 链路三真实 Docker 中间件 L2/L3 测试〔V1~V4 四策略 200 并发抢 20 零超卖、50 并发双座连座与走道拦截、COMMIT 丢包回查补单、立碑拦截迟到 Lua `-3`、消费 3x 重投+超时补发、首请重放/换设备找回/A0307/A0308、巡检 vs 消费 `CREATE_DECISION` 竞速〕，双形态原始发行包隔离 E2E `monolith` + `distributed` 全绿，默认库与 Redis DB 0 哨兵 100% 完好，脱敏 0 命中）。见 [链路三规格书与实测记录](./domains/03-order-seckill.md#八phase-3-实证验收结果2026-11-20)。 |
 | **Phase 4** | `v0.5.0-chain4` | ⬜ 未开始 | 链路四：Mock 支付故障注入、15min 关单竞速、出票履约、退款 Saga、悬挂+T+1 四方对账 | 待验收 |
 | **Phase 5** | `v0.9.0-bench` | ⬜ 未开始 | 5,000+ Token 池真实 V1→V4 压测（含 V4 E2E 排空耗时）与 Grafana 观测报告 | 待验收 |
 | **Phase 6** | `v1.0.0-release` | ⬜ 未开始 | 零构建单页演示台 (`web-console/`)、完整开源 README 与 GitHub Actions 全绿发布 | 待验收 |
@@ -35,6 +35,11 @@
     - 节点 0：稳定游标分页 `GET /api/v1/shows`（城市绑定校验）、`GET /api/v1/shows/{showId}` Caffeine L1 (60s) + Redis L2 逻辑过期单锁异步重建 + 30s 空值缓存 + 目录布隆防穿透（100 并发重建严格 == 1，批量不存在 ID SQL == 0 且新增场次不被旧布隆永久误杀）；
     - 节点 1：`GET /api/v1/shows/{showId}/stock` 与 `GET /api/v1/shows/{showId}/zones/{zoneId}/seats`（原始字节 MSB 最高位优先解码，四态 `PREPARING` / 缺键 `503 B0201` / 真实零余量 `SOLD_OUT` / `ENDED` 零误报）；
     - 节点 2 & 3：7 套 `{showId}` 单槽 Lua 脚本实现 Fencing Token 版本化预热、任务崩溃续跑、安全改期（纳入 `PREHEATING` + 原子 `BLOCKED` + 单进程本地 / 分布式 OpenFeign 自动联动链路一重排提醒）、毫秒级准点开售门禁与后台异步 `ON_SALE`/`ENDED` 收敛；固化隔离数据双形态 E2E 脚本 `scripts/verify-chain2-e2e.ps1` 并双形态全绿通过。
+  - 链路三（Phase 3，分支 `feat/chain3-order-seckill`）全套能力已实证闭环（0 未决缺口）：
+    - 存储与契约底座：`t_order_0..3` 补齐 `request_id`/`request_fingerprint`/`sale_config_version`/`layout_version`/`seckill_strategy` 与 `uk_user_show_request`；新增 `t_order_action` 表（`CREATE_DECISION`/`CLOSE_CHECK`/`RELEASE_STOCK`）；扩展 `ErrorCode`（`A0307`/`A0308`/`B0103` HTTP 503）、`BizException` 结构化 `data` 透传、`RedisKeys` 全 `{showId}` 单槽键、`OrderTimeoutEvent` 与 `ZoneSeatSpecDTO`；
+    - 节点 0 & 1：`SeckillRateLimitGlobalFilter`（用户/场次写路径限流 HTTP `429/B0101`）、`POST /api/v1/seckill/token`（绑定 `(userId, showId, saleConfigVersion)` 支持售罄/冲突保留 Token 换档重试）、两段式短 Lua `seckill_req_bind.lua` + `seckill_req_release.lua`、同设备 `clientRequestId` 超时找回与篡改 `A0307`、变价 `A0308`、换设备 `GET /api/v1/orders/current`；
+    - 节点 2：V1(`DbOptimistic`) / V2(`ShowLock`) / V3(`TierLock`) / V4(`LuaMq`) 四策略同仓隔离可切换；升级 `seckill_deduct.lua` / `seckill_seat_deduct.lua` / `seckill_rollback.lua` 并新增 `seckill_tx_check.lua` 原子回查立墓碑；自主选座连座走道 `segment_id` 严格校验；
+    - 节点 3 & 4：`OrderCreateConsumer` 每票档并发信号量 + 独立短事务预创建 `CREATE_DECISION` 消除 InnoDB Gap Lock 死锁 + 同事务三层幂等落单与 `CLOSE_CHECK` 落账；`OrderTimeoutDispatchScheduler` 可靠投递 `TOPIC_ORDER_TIMEOUT`；`PendingDeductReconcileScheduler`（仅 `ZRANGEBYSCORE`，零 `KEYS`/`SCAN`）；基因分片精准单表查询与稳定游标分页；`starshow-order-exec.jar` 零补丁独立冷启动 + 双形态隔离 E2E 脚本 `scripts/verify-chain3-e2e.ps1` 全绿通过。
   - 真实 Docker Core 栈（MySQL 8.0.39 / Redis 7.4 / RocketMQ 5.3.0 / Nacos v2.4.3）健康运行。
   - 远程仓库推送：已配置仓库级脱敏身份（noreply 邮箱）与独立凭据隔离，推送畅通。
 
@@ -42,5 +47,5 @@
 
 ## 三、下一阶段执行清单
 
-1. Phase 1（链路一）与 Phase 2（链路二）均已全部实证通过，待用户确认后依次合并分支至 `main` 并打 `v0.2.0-chain1` / `v0.3.0-chain2` Tag。
-2. Phase 3（链路三：V1→V4 演进式抢票引擎、Lua 预扣/选座与门禁校验、RocketMQ 事务消息防悬挂回查、基因分表）设计规格已定稿于 [抢票与下单](./domains/03-order-seckill.md) 与 [接口总契约](./contracts/API_CONTRACT.md)，确认后即可切出功能分支启动实施。
+1. Phase 1（链路一）、Phase 2（链路二）与 Phase 3（链路三）均已全部实证通过，待用户确认后依次合并分支至 `main` 并打 `v0.2.0-chain1` / `v0.3.0-chain2` / `v0.4.0-chain3` Tag。
+2. Phase 4（链路四：Mock 支付故障注入、15min 关单竞速、电子票履约、退款 Saga、悬挂+T+1 四方对账）待按规格书 [支付、关单与对账](./domains/04-payment-reconcile.md) 启动实施。
