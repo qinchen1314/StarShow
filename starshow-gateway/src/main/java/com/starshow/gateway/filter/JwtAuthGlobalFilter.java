@@ -50,6 +50,7 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
     private static final List<WhitelistRule> WHITELIST_RULES = List.of(
             WhitelistRule.of(HttpMethod.POST, "/api/v1/auth/register"),
             WhitelistRule.of(HttpMethod.POST, "/api/v1/auth/login"),
+            WhitelistRule.of(HttpMethod.POST, "/api/v1/payments/callback"),
             WhitelistRule.of(HttpMethod.GET, "/api/v1/shows/**"),
             WhitelistRule.of(HttpMethod.GET, "/api/v1/reservations/*/count"),
             WhitelistRule.of(HttpMethod.GET, "/actuator/health"),

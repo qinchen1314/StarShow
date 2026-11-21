@@ -2,7 +2,7 @@
 
 > 所有模块新增或调整对外 REST 接口时，必须同步更新本契约表。
 >
-> Phase 2～4 项为设计评审稿。精确请求、响应、状态、默认值及失败恢复分别见 [链路二规格](../domains/02-show-inventory.md)、[链路三规格](../domains/03-order-seckill.md)、[链路四规格](../domains/04-payment-reconcile.md)。
+> 精确请求、响应、状态、默认值及失败恢复分别见 [链路二规格](../domains/02-show-inventory.md)、[链路三规格](../domains/03-order-seckill.md)、[链路四规格](../domains/04-payment-reconcile.md)。
 
 ## 1. 全局协议规范
 
@@ -63,7 +63,7 @@
 | `POST /api/v1/seckill/orders` | 用 `clientRequestId` 经 `seckill_req_bind.lua` 首请超时找回原单号，支持自动配座或自主选座。V1～V3 成功返回 `200`。V4 确认受理返回 `202` + `orderNo`。 | 实名 | ✅ Phase 3 已验收 |
 | `GET /api/v1/orders/{orderNo}/status` | 本人 V4 办理进度。尚未落单时带 `showId`。明确返回 `PENDING_CONFIRM`、`WAIT_PAY` 或已证实的 `FAILED`。已落单后返回实际订单状态。 | 登录 | ✅ Phase 3 已验收 |
 | `GET /api/v1/orders/current` | Query `showId`，凭登录态找回本人该场次当前在途或有效订单，解决换设备或杀 App 恢复。 | 登录 | ✅ Phase 3 已验收 |
-| `GET /api/v1/orders/{orderNo}` | 按基因订单号单分片精准查单（轮询落库、支付状态及关单后异常退款进度） | 登录 | ✅ Phase 3 已验收 |
+| `GET /api/v1/orders/{orderNo}` | 按基因订单号单分片查询订单详情。资金结果由支付、退款查询返回。 | 登录 | ✅ Phase 3 已验收 |
 | `GET /api/v1/orders` | 查询当前用户订单列表（稳定游标分页，仅命中本人单个分片） | 登录 | ✅ Phase 3 已验收 |
 
 ### 链路四：支付、故障注入、退款与对账 (`starshow-payment`)
@@ -71,13 +71,15 @@
 | --- | --- | --- | --- |
 | `POST /api/v1/payments` | 创建支付单（截止时间取 `min(now+14m30s, order.expireTime-30s)`，超保护窗拒建） | 登录 | Phase 4 |
 | `GET /api/v1/payments/{payNo}` | 查询本人支付状态、实际截止、下一步及关单异常退款进度。 | 登录 | Phase 4 |
+| `GET /api/v1/payments/order/{orderNo}` | 凭订单号找回本人支付单，适合支付返回失败或换设备续查。 | 登录 | Phase 4 |
 | `POST /api/v1/payments/mock/pay/{payNo}` | Mock 支付触发器（支持 `?fault=NONE\|DUPLICATE_3X\|DROP_CALLBACK\|DELAY_20S\|RACE_WITH_CLOSE`） | 登录/演练 | Phase 4 |
 | `POST /api/v1/payments/callback` | 支付渠道回调验签与幂等入账入口 | 验签 | Phase 4 |
 | `POST /api/v1/orders/{orderNo}/cancel` | 本人申请取消未支付订单。确认渠道已关闭且未付后关单并记释放任务。 | 登录 | Phase 4 |
 | `GET /api/v1/tickets/order/{orderNo}` | 返回本人出票中状态（含已锁座位预览）或可展示电子票与防伪码。 | 登录 | Phase 4 |
 | `POST /api/v1/refunds` | 发起退款（驱动退款 Saga 状态机） | 登录 | Phase 4 |
 | `GET /api/v1/refunds/{refundNo}` | 查询本人退款进度和已确认资金结果。 | 登录 | Phase 4 |
-| `POST /internal/reconciliation/run` | 手动触发悬挂巡检 / T+1 四方对账（演示与集成测试用） | 内部密钥（公网零路由） | Phase 4 |
+| `GET /api/v1/refunds/order/{orderNo}` | 凭订单号找回本人正常或异常退款申请。 | 登录 | Phase 4 |
+| `POST /internal/reconciliation/run` | 运行已结束账日的四方对账，带 `nextCursor` 时可续跑。 | 内部密钥（公网零路由） | Phase 4 |
 | `GET /internal/reconciliation/diffs` | 查询四方对账差异审计表 | 内部密钥（公网零路由） | Phase 4 |
 
 ### 链路二至四的新增结果码与 Lua 兼容性
@@ -90,6 +92,7 @@
 | `B0201` / `C0401` | 库存暂不可用 / 渠道结果暂无法确认。 |
 | Lua `-1, -2, -3, -4` | 维持余量不足、重复购买、防悬挂拒绝、座位冲突。对应 `A0301, A0302, A0306, A0204`。`A0203` 继续表示票档不存在。 |
 | Lua `-5, -6` | 拟增库存或必要位图缺失、门禁关闭或版本/时段不符。准备中或停售用 `A0202`，在售真实资源不可用用 `B0201`，客户端版本过时用 `A0205`。 |
+| 回补 Lua `1, 0, -1` | 本次回补成功、已存在匹配的回补凭证、证据不足。防悬挂墓碑只负责阻止迟到扣减。 |
 
 ---
 

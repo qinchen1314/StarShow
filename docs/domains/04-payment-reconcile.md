@@ -1,6 +1,6 @@
 # 板块 04：链路四完整开发设计规格书（Mock 支付 · 超时关单 · 出票 · 退款 Saga · 四方对账）
 
-- **文档状态**　设计评审稿。仓库已有订单状态机、核心表结构、MQ Topic 与 Lua 回补契约。支付、出票、退款与对账服务属于 Phase 4 待实现范围。
+- **文档状态**　实施规格。运行方式与实证范围见本文末尾。
 - **映射模块**　`starshow-payment` 负责渠道与资金，`starshow-order` 负责订单、电子票及库存释放。`starshow-api` 定义跨模块接口。
 - **目标里程碑**　Phase 4（`v0.5.0-chain4`）。
 
@@ -128,12 +128,14 @@ sequenceDiagram
 | --- | --- | --- |
 | `POST /api/v1/payments` | `{orderNo}` → `{payNo,orderNo,amountCent,paymentStatus,paymentExpireTime,orderExpireTime,serverTime}`。重复提单复用原支付单。 | 本人 |
 | `GET /api/v1/payments/{payNo}` | `{payNo,orderNo,amountCent,paymentStatus,paymentExpireTime,orderExpireTime,serverTime,nextAction,abnormalRefundNo?,abnormalRefundStatus?}`。用于掉线或支付跳转后恢复，关单后异常到账时同页直接给出自动退款单号与进度。 | 本人 |
+| `GET /api/v1/payments/order/{orderNo}` | 凭订单号找回上述支付视图。 | 本人 |
 | `POST /api/v1/payments/mock/pay/{payNo}` | 可选 `fault`，返回模拟渠道受理状态。最终支付结果以后续查询为准。 | 本人 + 演练配置 |
 | `POST /api/v1/payments/callback` | 签名头，`payNo,orderNo,channelTradeNo,amountCent,channelStatus,paidTime`。合法重放按成功应答。 | 签名 |
 | `POST /api/v1/orders/{orderNo}/cancel` | `{orderNo,orderStatus,nextAction}`，仅在渠道确认为未付且已关闭时推进关单。 | 本人 |
 | `GET /api/v1/tickets/order/{orderNo}` | `{orderNo,issueStatus,seatPreview?,tickets[]}`。未出票时不含可用核销码但可预览已锁定区/座信息。 | 本人 |
 | `POST /api/v1/refunds` | `{orderNo,reason}` → `{refundNo,orderNo,amountCent,refundStatus}`。 | 本人 |
 | `GET /api/v1/refunds/{refundNo}` | `{refundNo,orderNo,amountCent,refundStatus,payRefundStatus,updatedAt,nextAction}`。按本人订单保护。 | 本人 |
+| `GET /api/v1/refunds/order/{orderNo}` | 凭订单号找回退款申请及资金状态。 | 本人 |
 | `POST /internal/reconciliation/run` / `GET /internal/reconciliation/diffs` | 触发 `{mode,billDate?}`，返回运行标识。差异以 `billDate,status,cursor,limit` 分页查询。 | 内部密钥（公网零路由） |
 
 沿用 `A0304`（订单不可见）、`A0305`（订单状态不允许）、`A0401`（支付单不存在）、`A0402`（验签失败）、`A0403`（金额不符）、`A0404`（不可退款）。拟增 `A0405`（支付窗口已关闭）、`A0406`（退款单不存在）、`C0401`（渠道暂无法确认，HTTP 503）。非本人支付或退款与不存在采用同一业务码。访客页面只接收支付和退款所需字段，运维补偿详情仅管理端可见。
@@ -231,3 +233,18 @@ sequenceDiagram
 | 双形态 | 独立原包与聚合模式在隔离数据下完成付款→出票→退款，以及未付关闭→余票回流。构造先卖完、再释放一张、另一用户重新买到，核对 Redis 与 MySQL 库存均只回补一次。逐单对照资金、订单和票据，检查默认库哨兵安全。 |
 
 实施顺序为渠道账与受理接口 → 回调/关单共用状态机 → 出票 → 退款 Saga 与释放凭证 → 双重对账和演练。L1 使用 `mvn -B -pl starshow-payment,starshow-order -am test`。L3 使用真实 MySQL、Redis 和 RocketMQ，Mock 渠道作为有独立账本的业务模拟组件，隔离测试工具只用于控制时序和注入故障。
+
+## 八、运行与实施口径
+
+1. 已有实例按当前数据库版本依次导入 `docker/mysql/migrations/V2__phase2_show_inventory.sql`、`V3__phase3_order_seckill.sql`、`V4__phase4_payment_fulfillment.sql`，每次显式指定目标 schema。新建库使用 `docker/mysql/init/01_schema.sql`。票据新增序号列允许存量记录为 NULL，新签票据使用从 1 开始的序号。若已有重复对账记录，升级前先人工确认归档，唯一索引会拒绝重复键。
+2. 聚合态和独立订单服务通过 `STARSHOW_PAYMENT_ENABLED=true` 启用链路四。独立支付包以 `distributed` 启动，默认端口 8004。订单与支付实例使用相同 JVM 时区，按部署规范设置为 Asia/Shanghai。分别注入独立的 `STARSHOW_MOCK_PAY_SIGN_SECRET` 和 `STARSHOW_TICKET_SIGN_SECRET`，以及项目已有内部鉴权密钥。Mock 扣款与故障开关默认关闭，可分别在隔离演练环境开启。
+3. MQ 初始化需有 `TOPIC_ORDER_TIMEOUT`（DELAY）、`TOPIC_TICKET_ISSUE`（NORMAL）、`TOPIC_REFUND_EVENT`（NORMAL）。出票待办以 `ticket-issue:<orderNo>` 唯一标识，Broker 不可用或延迟时由数据库待办继续推进。退款消息用于启动 Saga，后续步骤直接扫描退款表的 `status,next_retry_at` 索引，数据库 CAS 和渠道退款键裁决重放。
+4. 关单和退款提交后通过同单 `RELEASE_STOCK` 动作推进。DB 物理库存依据 `db_released_at` 只回补一次，V4 同槽 Lua 在核验实际持有者、Key 类型及座位索引后释放热库存并写入 `orderNo:qty` 独立回执。只有墓碑、凭证超期或占有归属不明时，保留 `MANUAL_CHECK`。V1～V3 在 MySQL 释放物理库存及所选座位。
+5. T+1 以上海账日的左闭右开区间发现候选订单，再读取四方当前可核对状态。管理端可从 `nextCursor` 重跑同账日，差异记录按账日、单号、类型去重。当前实现保留差异和自动补出票结果。金额或库存证据不足时留待人工核对；以历史时点重建完整流水快照属于后续加强。
+6. 串行实跑使用 `scripts/verify-live-tests.ps1 -Chain Chain4`。脚本使用新 schema、空闲的非 0 Redis DB，限制测试 JVM 堆内存为 288 MiB，保留既有并发与断言。打包后可追加 `-FromPhase2Schema -Distributed`，验证存量库升级及订单、支付原始发行包的 Feign 联调，每个服务堆上限 192 MiB。
+
+## 九、2026-11-21 实证结果
+
+- L1 共 90 项常规测试通过，四条链路的真实中间件测试共 24 项通过。链路四的 7 项覆盖 5 次回调只有一张票、漏回调主动查单、已关闭订单迟到到账后单次退款、正常退款重放、核销后禁退、注入 1 分差异以及墓碑和错误持有人不得改库存。
+- Phase 2 存量订单经过 V3 与 V4 迁移并重复执行后仍保留原金额和状态。分布式发行包联调实测付款 → 出票 → 原路退款，以及未支付取消 → 回补，Redis 和 MySQL 均从 0 恢复至 2。
+- 这轮通过持久步骤重放覆盖了 Redis 已释放且数据库待补记的情形。进程强杀重启的每个退款断点、全量历史账本重建和 Phase 5 的容量测试仍需单独验证。

@@ -1,0 +1,35 @@
+server:
+  port: ${STARSHOW_PAYMENT_PORT:8004}
+
+spring:
+  application:
+    name: starshow-payment
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:starshow}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      password: ${REDIS_PASSWORD:}
+
+rocketmq:
+  name-server: ${ROCKETMQ_NAME_SERVER:127.0.0.1:9876}
+  producer:
+    group: pg-starshow-payment
+
+starshow:
+  worker-id: ${STARSHOW_WORKER_ID:4}
+  security:
+    jwt-secret: ${STARSHOW_JWT_SECRET:}
+    internal-gateway-secret: ${STARSHOW_INTERNAL_GATEWAY_SECRET:}
+  payment:
+    enabled: ${STARSHOW_PAYMENT_ENABLED:true}
+    callback-secret: ${STARSHOW_MOCK_PAY_SIGN_SECRET:}
+    mock-enabled: ${STARSHOW_MOCK_PAY_ENABLED:false}
+    fault-enabled: ${STARSHOW_MOCK_PAY_FAULT_ENABLED:false}
+    mq-enabled: ${STARSHOW_PAYMENT_MQ_ENABLED:true}
+  services:
+    order-uri: ${ORDER_SERVICE_URI:http://127.0.0.1:8003}

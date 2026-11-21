@@ -7,6 +7,10 @@ package com.starshow.common.constant;
  */
 public final class RedisKeys {
 
+    public static String stockReleaseReceipt(long showId, long orderNo) {
+        return "starshow:stock_release_receipt:{" + showId + "}:" + orderNo;
+    }
+
     private RedisKeys() {
     }
 

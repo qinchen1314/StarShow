@@ -55,6 +55,13 @@ public interface OrderActionMapper extends BaseMapper<OrderActionDO> {
                                                 @Param("now") LocalDateTime now,
                                                 @Param("limit") int limit);
 
+    @Select("""
+            SELECT * FROM t_order_action WHERE action_type = 'RELEASE_STOCK' AND payload_json IS NULL
+            AND status = 'PENDING' AND next_retry_at <= #{now} AND deleted = 0
+            ORDER BY next_retry_at, action_id LIMIT #{limit}
+            """)
+    List<OrderActionDO> selectDueFulfillmentReleases(@Param("now") LocalDateTime now, @Param("limit") int limit);
+
     @Update("UPDATE t_order_action SET status = 'SENT', attempt = attempt + 1, last_error_code = NULL, update_time = #{now} " +
             "WHERE action_id = #{actionId} AND status = 'PENDING' AND deleted = 0")
     int casMarkSent(@Param("actionId") long actionId, @Param("now") LocalDateTime now);

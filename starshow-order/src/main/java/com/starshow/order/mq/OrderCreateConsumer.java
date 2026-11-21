@@ -97,7 +97,7 @@ public class OrderCreateConsumer implements RocketMQListener<OrderCreateEvent> {
 
     private void rollbackV4DeductIfNeeded(OrderCreateEvent event, String failCode) {
         long ttlSec = Math.max(60L, properties.getDeductProofTtlSeconds());
-        redisScripts.executeRollback(
+        long released = redisScripts.executeRollback(
                 event.getShowId(),
                 event.getTierId(),
                 event.getZoneId(),
@@ -107,6 +107,9 @@ public class OrderCreateConsumer implements RocketMQListener<OrderCreateEvent> {
                 ttlSec,
                 event.getSeatIndices()
         );
+        if (released < 0) {
+            throw new IllegalStateException("Unproven inventory release for rejected order " + event.getOrderNo());
+        }
         persistenceService.markReleaseStockDone(event.getOrderNo());
         redisScripts.updateAttemptAndReqStatus(
                 event.getShowId(),

@@ -24,6 +24,13 @@ rocketmq:
     group: pg-starshow-boot-all
 
 starshow:
+  payment:
+    enabled: ${STARSHOW_PAYMENT_ENABLED:false}
+    callback-secret: ${STARSHOW_MOCK_PAY_SIGN_SECRET:}
+    ticket-secret: ${STARSHOW_TICKET_SIGN_SECRET:}
+    mock-enabled: ${STARSHOW_MOCK_PAY_ENABLED:false}
+    fault-enabled: ${STARSHOW_MOCK_PAY_FAULT_ENABLED:false}
+    mq-enabled: ${STARSHOW_PAYMENT_MQ_ENABLED:true}
   worker-id: ${STARSHOW_WORKER_ID:1}
   seckill:
     # 动态切换抢票演进策略：V1 | V2 | V3 | V4

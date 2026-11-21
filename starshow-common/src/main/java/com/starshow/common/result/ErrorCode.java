@@ -45,6 +45,9 @@ public enum ErrorCode {
     PAYMENT_SIGN_INVALID("A0402", "支付回调验签失败"),
     PAYMENT_AMOUNT_MISMATCH("A0403", "支付回调金额与订单不一致"),
     REFUND_NOT_ALLOWED("A0404", "当前订单状态不允许退款"),
+    PAYMENT_WINDOW_CLOSED("A0405", "支付窗口已关闭"),
+    REFUND_NOT_FOUND("A0406", "退款单不存在"),
+    CHANNEL_UNCERTAIN("C0401", "渠道状态暂无法确认"),
 
     // 系统与限流 (B01xx / B02xx)
     TOO_MANY_REQUESTS("B0101", "当前抢票人数过多，请稍后再试"),

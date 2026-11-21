@@ -26,6 +26,11 @@ starshow:
   services:
     user-uri: ${USER_SERVICE_URI:http://127.0.0.1:8001}
     show-uri: ${SHOW_SERVICE_URI:http://127.0.0.1:8002}
+    payment-uri: ${PAYMENT_SERVICE_URI:http://127.0.0.1:8004}
+  payment:
+    enabled: ${STARSHOW_PAYMENT_ENABLED:false}
+    ticket-secret: ${STARSHOW_TICKET_SIGN_SECRET:}
+    mq-enabled: ${STARSHOW_PAYMENT_MQ_ENABLED:true}
   feign:
     connect-timeout-ms: ${STARSHOW_FEIGN_CONNECT_TIMEOUT_MS:2000}
     read-timeout-ms: ${STARSHOW_FEIGN_READ_TIMEOUT_MS:5000}

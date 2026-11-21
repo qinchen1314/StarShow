@@ -248,7 +248,7 @@ public class OrderRedisScripts {
     }
 
     /**
-     * 幂等回补预扣库存、座位与 bought_owner（返回 1 表示本次成功回补，0 表示已回补过幂等跳过）
+     * 回补预扣库存与座位。1 表示本次释放，0 表示凭证已存在，-1 表示证据不足。
      */
     public long executeRollback(long showId, long tierId, String zoneId, long userId, int qty, long orderNo,
                                 long ttlSec, List<Integer> seatIndices) {
@@ -259,7 +259,8 @@ public class OrderRedisScripts {
                 RedisKeys.rollbackDone(showId, orderNo),
                 RedisKeys.deductPendingZset(showId),
                 RedisKeys.seatBitmap(showId, safeZone),
-                RedisKeys.boughtOwner(showId)
+                RedisKeys.boughtOwner(showId),
+                RedisKeys.stockReleaseReceipt(showId, orderNo)
         );
         List<String> args = new ArrayList<>(4 + (seatIndices == null ? 0 : seatIndices.size()));
         args.add(String.valueOf(userId));
@@ -272,7 +273,7 @@ public class OrderRedisScripts {
             }
         }
         Long res = redis.execute(rollbackScript, keys, args.toArray());
-        return res == null ? 0L : res;
+        return res == null ? -1L : res;
     }
 
     public void removeDeductPending(long showId, long orderNo) {
@@ -338,6 +339,16 @@ public class OrderRedisScripts {
 
     public boolean hasRollbackDone(long showId, long orderNo) {
         return Boolean.TRUE.equals(redis.hasKey(RedisKeys.rollbackDone(showId, orderNo)));
+    }
+
+    public boolean hasStockReleaseReceipt(long showId, long orderNo) {
+        String proof = redis.opsForValue().get(RedisKeys.stockReleaseReceipt(showId, orderNo));
+        return proof != null && proof.startsWith(orderNo + ":");
+    }
+
+    public boolean hasStockReleaseReceipt(long showId, long orderNo, int quantity) {
+        String proof = redis.opsForValue().get(RedisKeys.stockReleaseReceipt(showId, orderNo));
+        return (orderNo + ":" + quantity).equals(proof);
     }
 
     public Long readBoughtOwnerOrderNo(long showId, long userId) {

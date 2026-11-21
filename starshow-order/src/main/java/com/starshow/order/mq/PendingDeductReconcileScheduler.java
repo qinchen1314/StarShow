@@ -101,8 +101,8 @@ public class PendingDeductReconcileScheduler {
             return ReconcileResult.CLEANED_EXISTING_ORDER;
         }
 
-        // 2. 若已存在回补墓碑，说明之前已回补或事务已回滚，清理悬挂索引即可
-        if (redisScripts.hasRollbackDone(showId, orderNo)) {
+        // A tombstone can also mean that the broker denied the original deduction.
+        if (redisScripts.hasStockReleaseReceipt(showId, orderNo)) {
             redisScripts.removeDeductPending(showId, orderNo);
             persistenceService.markReleaseStockDone(orderNo);
             return ReconcileResult.ALREADY_ROLLED_BACK;
@@ -155,6 +155,9 @@ public class PendingDeductReconcileScheduler {
                     Math.max(60L, properties.getDeductProofTtlSeconds()),
                     seats
             );
+            if (rolled < 0L) {
+                return ReconcileResult.KEPT_FOR_VERIFICATION;
+            }
             persistenceService.markReleaseStockDone(orderNo);
             OrderRedisScripts.AttemptRecord attempt = redisScripts.readAttempt(showId, orderNo);
             String clientReqId = attempt == null ? null : attempt.getClientRequestId();

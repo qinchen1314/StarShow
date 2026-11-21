@@ -45,9 +45,13 @@ public final class SecuritySecretValidator {
     }
 
     public static void validateJwtSecret(String value) {
-        validateRequiredNonPlaceholder(value, PROP_JWT_SECRET);
+        validateSigningSecret(value, PROP_JWT_SECRET);
+    }
+
+    public static void validateSigningSecret(String value, String propertyName) {
+        validateRequiredNonPlaceholder(value, propertyName);
         if (value.getBytes(StandardCharsets.UTF_8).length < MIN_JWT_SECRET_BYTES) {
-            throw new IllegalStateException("Invalid security configuration length (require >= 32 bytes): " + PROP_JWT_SECRET);
+            throw new IllegalStateException("Invalid security configuration length (require >= 32 bytes): " + propertyName);
         }
     }
 

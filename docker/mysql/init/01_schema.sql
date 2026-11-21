@@ -192,7 +192,8 @@ CREATE TABLE IF NOT EXISTS `t_order_0` (
     UNIQUE KEY `uk_user_show_active` (`user_id`, `show_id`, `active_flag`),
     UNIQUE KEY `uk_user_show_request` (`user_id`, `show_id`, `request_id`),
     KEY `idx_status_expire` (`status`, `expire_time`),
-    KEY `idx_user_create` (`user_id`, `create_time`, `order_no`)
+    KEY `idx_user_create` (`user_id`, `create_time`, `order_no`),
+    KEY `idx_order_bill` (`update_time`, `order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单分表 0';
 
 CREATE TABLE IF NOT EXISTS `t_order_1` LIKE `t_order_0`;
@@ -204,6 +205,7 @@ ALTER TABLE `t_order_3` COMMENT='订单分表 3';
 
 CREATE TABLE IF NOT EXISTS `t_ticket_0` (
     `ticket_no`     BIGINT       NOT NULL COMMENT '电子票号',
+    `ticket_item_no` SMALLINT    NULL COMMENT '同订单票序号，存量票允许为空',
     `order_no`      BIGINT       NOT NULL COMMENT '关联订单号',
     `user_id`       BIGINT       NOT NULL COMMENT '用户ID（分片键）',
     `show_id`       BIGINT       NOT NULL COMMENT '演出场次ID',
@@ -215,6 +217,7 @@ CREATE TABLE IF NOT EXISTS `t_ticket_0` (
     `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`ticket_no`),
+    UNIQUE KEY `uk_order_item` (`order_no`, `ticket_item_no`),
     KEY `idx_order_no` (`order_no`),
     KEY `idx_user_show` (`user_id`, `show_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='电子票分表 0';
@@ -243,6 +246,8 @@ CREATE TABLE IF NOT EXISTS `t_order_action` (
     `user_id`         BIGINT        NOT NULL COMMENT '用户ID（分库演进时随user_id路由）',
     `show_id`         BIGINT        NOT NULL COMMENT '演出场次ID',
     `action_type`     VARCHAR(32)   NOT NULL COMMENT 'CREATE_DECISION/CLOSE_CHECK/RELEASE_STOCK',
+    `db_released_at`  DATETIME      NULL,
+    `attempted_at`    DATETIME      NULL,
     `status`          VARCHAR(24)   NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/APPLIED/REJECTED/SENT/DONE/FAILED',
     `payload_json`    VARCHAR(1024) NULL COMMENT '动作上下文JSON',
     `next_retry_at`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次可调度时间',
@@ -270,6 +275,9 @@ CREATE TABLE IF NOT EXISTS `t_payment_order` (
     `amount_cent`      BIGINT      NOT NULL COMMENT '支付金额（分）',
     `status`           VARCHAR(24) NOT NULL DEFAULT 'INIT' COMMENT 'INIT/SUCCESS/CLOSED/ABNORMAL_PAID',
     `expire_time`      DATETIME    NOT NULL COMMENT '支付通道过期时间(默认14m30s错峰)',
+    `order_expire_time` DATETIME   NULL,
+    `sync_pending`     TINYINT    NOT NULL DEFAULT 0,
+    `next_retry_at`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `paid_time`        DATETIME    NULL COMMENT '支付成功时间',
     `deleted`          TINYINT     NOT NULL DEFAULT 0,
     `create_time`      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -277,7 +285,8 @@ CREATE TABLE IF NOT EXISTS `t_payment_order` (
     PRIMARY KEY (`pay_no`),
     UNIQUE KEY `uk_order_no` (`order_no`),
     UNIQUE KEY `uk_channel_trade_no` (`channel_trade_no`),
-    KEY `idx_paid_time` (`paid_time`)
+    KEY `idx_paid_time` (`paid_time`),
+    KEY `idx_payment_sync` (`sync_pending`, `next_retry_at`, `pay_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付流水表';
 
 CREATE TABLE IF NOT EXISTS `t_refund_order` (
@@ -289,12 +298,19 @@ CREATE TABLE IF NOT EXISTS `t_refund_order` (
     `saga_step`   VARCHAR(32)  NOT NULL DEFAULT 'INIT' COMMENT 'INIT/LOCK_TICKET/REFUND_PAY/ROLLBACK_STOCK/DONE',
     `status`      VARCHAR(24)  NOT NULL DEFAULT 'PROCESSING' COMMENT 'PROCESSING/SUCCESS/FAILED',
     `retry_count` INT          NOT NULL DEFAULT 0 COMMENT 'Saga重试次数',
+    `refund_type` VARCHAR(24)   NOT NULL DEFAULT 'NORMAL',
+    `pay_refund_status` VARCHAR(24) NOT NULL DEFAULT 'PENDING',
+    `channel_refund_no` VARCHAR(64) NULL,
+    `next_retry_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `last_error_code` VARCHAR(32) NULL,
     `deleted`     TINYINT      NOT NULL DEFAULT 0,
     `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`refund_no`),
     UNIQUE KEY `uk_order_no` (`order_no`),
-    KEY `idx_status_step` (`status`, `saga_step`)
+    KEY `idx_status_step` (`status`, `saga_step`),
+    KEY `idx_refund_retry` (`status`, `next_retry_at`, `refund_no`),
+    KEY `idx_refund_bill` (`update_time`, `order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退款Saga状态机表';
 
 CREATE TABLE IF NOT EXISTS `t_reconciliation_diff` (
@@ -304,10 +320,31 @@ CREATE TABLE IF NOT EXISTS `t_reconciliation_diff` (
     `diff_type`     VARCHAR(32)  NOT NULL COMMENT 'SHORT(短款)/LONG(长款)/STATE_MISMATCH/TICKET_MISSING/STOCK_DRIFT',
     `handle_status` VARCHAR(20)  NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN/AUTO_FIXED/MANUAL_REVIEW/RESOLVED',
     `detail_json`   TEXT         NOT NULL COMMENT '四方比对快照JSON',
+    `owner_module`  VARCHAR(24)  NOT NULL DEFAULT 'starshow-payment',
+    `suggested_action` VARCHAR(64) NOT NULL DEFAULT 'VERIFY',
     `deleted`       TINYINT      NOT NULL DEFAULT 0,
     `create_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_bill_order_diff` (`bill_date`, `order_no`, `diff_type`),
     KEY `idx_bill_date_status` (`bill_date`, `handle_status`),
     KEY `idx_order_no` (`order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日四方对账差异审计表';
+
+CREATE TABLE IF NOT EXISTS t_mock_channel_txn (
+    kind VARCHAR(8) NOT NULL,
+    merchant_biz_no BIGINT NOT NULL,
+    order_no BIGINT NOT NULL,
+    amount_cent BIGINT NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    channel_trade_no VARCHAR(64) NULL,
+    expire_time DATETIME NULL,
+    confirmed_at DATETIME NULL,
+    delivery_at DATETIME NULL,
+    delivery_fault VARCHAR(24) NULL,
+    PRIMARY KEY (kind, merchant_biz_no),
+    UNIQUE KEY uk_channel_trade (channel_trade_no),
+    KEY idx_delivery (delivery_at, merchant_biz_no),
+    KEY idx_channel_order (order_no),
+    KEY idx_channel_bill (confirmed_at, order_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

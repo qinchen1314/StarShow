@@ -91,7 +91,8 @@ public class OrderQueryService {
 
         // 若存在明确终止证据（CREATE_DECISION=REJECTED 或 attempt=FAILED 或已立回补墓碑 rollback_done）
         if (decision != null && OrderActionDO.STATUS_REJECTED.equals(decision.getStatus())) {
-            boolean released = rollbackDone || deductLog == null;
+            boolean released = redisScripts.hasStockReleaseReceipt(showId, orderNo)
+                    || deductLog == null && !Long.valueOf(orderNo).equals(redisScripts.readBoughtOwnerOrderNo(showId, userId));
             return OrderStatusVO.builder()
                     .orderNo(orderNo)
                     .showId(showId)

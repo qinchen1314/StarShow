@@ -222,3 +222,9 @@ V4 已受理响应的 `data` 示例。实际支付时限等到持久订单进入
   5. 悬挂巡检 vs 延迟创单并发争夺 `CREATE_DECISION` 行锁（已根治独立短事务预创建 + 唯一索引等值 `FOR UPDATE` 消除 InnoDB Gap Lock 死锁）：无终止证据保单不盲退；10 轮并发竞速 + 巡检先胜出后迟到消费被拦截（`ALREADY_REJECTED`），资金与库存 100% 守恒。
 - **双形态原始发行包隔离 E2E（`scripts/verify-chain3-e2e.ps1`）**：
   - `monolith`（`boot-all` + `gateway` + `starshow-order-exec.jar` 缺失密钥拒绝启动）与 `distributed`（`order-exec.jar` 零补丁 + `show-exec.jar` + `user-exec.jar` + `gateway`）均 100% 通过，验证网关限流 HTTP `429/B0101`、`TraceId` 全程串联、基因分片精准落表与默认 `starshow` 库 / Redis DB 0 哨兵 100% 完好。
+
+## 九、Phase 4 接入复验（2026-11-21）
+
+- 从 Phase 2 库依次执行 V3 和 V4 迁移并各执行两次，原有订单金额和终态保持正确。
+- `seckill_rollback.lua` 先验证占用归属、库存和座位，再写独立回补凭证。巡检和客户端订单查询使用凭证确认结果，墓碑继续负责防悬挂。缺少明确释放证据时，未落单请求继续显示待确认。
+- `scripts/verify-live-tests.ps1 -Chain Chain3` 实跑 5 项全通过。四策略各 200 人并发争抢 20 张，均形成 20 笔有效单，零超卖、零重复单。V4 该轮受理阶段 210 ms，排空 684 ms，Redis 和数据库实际库存均为 0。这一轮用于验证正确性，Phase 5 另做 5,000+ JWT 用户的容量测量。
