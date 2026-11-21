@@ -173,19 +173,9 @@ public class ReservationService {
     }
 
     private MyReservationVO buildMyReservationVO(ShowBasicDTO show, ReservationDO record, boolean verified, LocalDateTime now) {
-        boolean ended;
-        boolean entryOpen;
-        String entryState = show.getEntryState();
-        if (entryState != null && !entryState.isBlank()) {
-            ended = "ENDED".equalsIgnoreCase(entryState);
-            entryOpen = "OPEN".equalsIgnoreCase(entryState);
-        } else {
-            ended = SHOW_STATUS_ENDED.equalsIgnoreCase(show.getSaleStatus())
-                    || (show.getSaleEndTime() != null && now.isAfter(show.getSaleEndTime()));
-            entryOpen = !ended
-                    && show.getSaleStartTime() != null
-                    && !now.isBefore(show.getSaleStartTime());
-        }
+        String resolvedEntryState = resolveAuthoritativeEntryState(show, now);
+        boolean ended = "ENDED".equals(resolvedEntryState);
+        boolean entryOpen = "OPEN".equals(resolvedEntryState);
 
         boolean reserved = record != null;
         String nextAction;
@@ -195,6 +185,10 @@ public class ReservationService {
             nextAction = "VERIFY_IDENTITY";
         } else if (entryOpen) {
             nextAction = "ENTER_SECKILL";
+        } else if ("SOLD_OUT".equals(resolvedEntryState)) {
+            nextAction = "WATCH_RESTOCK";
+        } else if ("STOCK_UNAVAILABLE".equals(resolvedEntryState)) {
+            nextAction = "RETRY_LATER";
         } else if (reserved) {
             nextAction = "WAIT_FOR_SALE";
         } else {
@@ -216,8 +210,36 @@ public class ReservationService {
                 .remindStatus(remindStatus)
                 .remindStatusLabel(ReservationDO.remindStatusLabel(remindStatus))
                 .entryOpen(entryOpen)
+                .entryState(resolvedEntryState)
                 .nextAction(nextAction)
+                .nextActionHint(nextActionHintFor(nextAction))
                 .build();
+    }
+
+    private String resolveAuthoritativeEntryState(ShowBasicDTO show, LocalDateTime now) {
+        String raw = show.getEntryState();
+        if (raw != null && !raw.isBlank()) {
+            return raw.trim().toUpperCase();
+        }
+        boolean ended = SHOW_STATUS_ENDED.equalsIgnoreCase(show.getSaleStatus())
+                || (show.getSaleEndTime() != null && now.isAfter(show.getSaleEndTime()));
+        if (ended) {
+            return "ENDED";
+        }
+        boolean inWindow = show.getSaleStartTime() != null && !now.isBefore(show.getSaleStartTime());
+        return inWindow ? "OPEN" : "PREPARING";
+    }
+
+    private String nextActionHintFor(String nextAction) {
+        return switch (nextAction) {
+            case "SALE_ENDED" -> "本场演出已停止售票";
+            case "VERIFY_IDENTITY" -> "请先完成实名认证，开票前实名可避免抢票被拦截";
+            case "ENTER_SECKILL" -> "正在热售，立即前往抢票";
+            case "WATCH_RESTOCK" -> "当前暂无余票，后续可能因未支付关单或退票释放余票，请留意余票变化";
+            case "RETRY_LATER" -> "库存暂不可用，请稍后刷新重试";
+            case "WAIT_FOR_SALE" -> "已预约，请关注官方开售倒计时";
+            default -> "立即预约，开票前自动提醒";
+        };
     }
 
     public ReservationCountVO getReservationCount(long showId) {

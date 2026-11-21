@@ -52,6 +52,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.time.Duration;
@@ -139,6 +140,8 @@ class Chain2LiveMiddlewareVerificationTest {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
+    private JdbcTemplate jdbcTemplate;
+    @Autowired
     private ObjectMapper objectMapper;
     @Autowired
     private GeneSnowflakeIdGenerator idGenerator;
@@ -157,6 +160,8 @@ class Chain2LiveMiddlewareVerificationTest {
     @BeforeEach
     void resetLocalState() {
         detailCacheService.clearLocalCaches();
+        gateEvaluator.clearLocalCaches();
+        seatMapQueryService.clearStaticLayoutCache();
         showMetrics.resetCountersForTest();
     }
 
@@ -572,6 +577,166 @@ class Chain2LiveMiddlewareVerificationTest {
                 && Integer.valueOf(3).equals(n.getSaleConfigVersion())));
     }
 
+    @Test
+    void test6_rescheduleCrashAfterCommitShouldRecoverRedisDetailAndChain1Notification() {
+        long showId = 92004L;
+        long tierId = 92104L;
+        long userId = 920899L;
+        LocalDateTime now = ShowTimeUtil.nowLocalDateTime();
+
+        cleanupShowRedis(showId, List.of(tierId), List.of());
+        showTaskMapper.delete(new LambdaQueryWrapper<ShowTaskDO>().eq(ShowTaskDO::getShowId, showId));
+        reservationMapper.delete(new LambdaQueryWrapper<com.starshow.user.domain.entity.ReservationDO>()
+                .eq(com.starshow.user.domain.entity.ReservationDO::getUserId, userId));
+        userNotificationMapper.delete(new LambdaQueryWrapper<UserNotificationDO>()
+                .eq(UserNotificationDO::getUserId, userId));
+        userIdentityMapper.delete(new LambdaQueryWrapper<UserIdentityDO>()
+                .eq(UserIdentityDO::getUserId, userId));
+        userIdentityMapper.insert(UserIdentityDO.builder()
+                .userId(userId).realNameCipher("cipher-name").idCardCipher("cipher-id")
+                .idCardMasked("1101**********5678").idCardHmac("hmac-crash-rec-" + userId)
+                .verifiedTime(now).deleted(0).build());
+        stringRedisTemplate.delete(RedisKeys.userVerified(userId));
+        stringRedisTemplate.delete(RedisKeys.reservationBloom(showId));
+
+        upsertShow(showId, "改期崩溃恢复实测场次", "成都", "AUTO_ALLOC", "INIT",
+                now.plusHours(8), now.plusDays(10), 1);
+        upsertTier(tierId, showId, "内场票", "CD_A", 78000L, 100, 100);
+        detailCacheService.refreshFromDb(showId);
+
+        // 用户完成预约（v1）
+        reservationService.reserve(userId, showId);
+        ShowDetailVO beforeCrashDetail = showQueryService.getShowDetail(showId);
+        assertEquals(1, beforeCrashDetail.getSaleConfigVersion());
+
+        // 模拟进程在同事务提交（DB CAS v1->v2 + 写 RESCHEDULE_SYNC PENDING）后立即崩溃，尚未发布 Redis 与通知
+        LocalDateTime newStart = now.plusDays(3).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        LocalDateTime newEnd = newStart.plusDays(10);
+        ShowScheduleService.RescheduleCommitResult committed = showScheduleService.commitRescheduleWithOutbox(showId, newStart, newEnd);
+        assertEquals(2, committed.newVersion());
+        assertNotNull(committed.syncTask());
+        assertEquals(ShowTaskDO.STATUS_PENDING, committed.syncTask().getStatus());
+
+        // 崩溃瞬间现场检查：DB 已是 v2、t_show_task 已有 1 条 PENDING 待办、Redis 仍停在 BLOCKED(v1)、用户尚未收到 v2 通知
+        assertEquals(2, showMapper.selectById(showId).getSaleConfigVersion());
+        assertEquals(ShowReadyState.STAGE_BLOCKED, redisScripts.readReadyState(showId).getStage());
+        assertTrue(userNotificationService.listMyNotifications(userId, 10).stream()
+                .noneMatch(n -> Integer.valueOf(2).equals(n.getSaleConfigVersion())));
+
+        // 恢复调度器续跑 -> 必须完整收敛 Redis(v2 INIT)、详情 L2(v2 新时间) 与链路一 SCHEDULE_CHANGED(v2) 通知！
+        int recovered = showTaskRecoveryScheduler.recoverPendingTasks();
+        assertTrue(recovered >= 1);
+
+        ShowTaskDO afterTask = showTaskMapper.selectByShowTypeVersion(showId, ShowTaskDO.TYPE_RESCHEDULE_SYNC, 2);
+        assertEquals(ShowTaskDO.STATUS_SUCCEEDED, afterTask.getStatus());
+        ShowReadyState readyAfter = redisScripts.readReadyState(showId);
+        assertEquals(2, readyAfter.getVersion());
+        assertEquals(ShowReadyState.STAGE_INIT, readyAfter.getStage());
+
+        detailCacheService.clearLocalCaches();
+        gateEvaluator.clearLocalCaches();
+        ShowDetailVO afterDetail = showQueryService.getShowDetail(showId);
+        assertEquals(2, afterDetail.getSaleConfigVersion());
+        assertEquals(ShowTimeUtil.toEpochMs(newStart), afterDetail.getSaleStartTime().toInstant().toEpochMilli());
+
+        List<UserNotificationVO> notifsAfter = userNotificationService.listMyNotifications(userId, 10);
+        assertTrue(notifsAfter.stream().anyMatch(n -> "SCHEDULE_CHANGED".equals(n.getNotificationType())
+                && Integer.valueOf(2).equals(n.getSaleConfigVersion())),
+                "Recovery scheduler must deliver missing SCHEDULE_CHANGED notification after crash");
+    }
+
+    @Test
+    void test7_hotPreSaleReadsAndSeatMapReadsShouldCoalesceDbAndAlignSoldOutReservationState() {
+        LocalDateTime now = ShowTimeUtil.nowLocalDateTime();
+
+        // === A. 未预热场次（无 Redis ready Hash）连续 20 次详情浏览：禁止逐次读 t_show（<= 1 次） ===
+        long preSaleShowId = 92005L;
+        long preSaleTierId = 92105L;
+        cleanupShowRedis(preSaleShowId, List.of(preSaleTierId), List.of());
+        upsertShow(preSaleShowId, "开票前热点读防护专场", "武汉", "AUTO_ALLOC", "INIT",
+                now.plusHours(5), now.plusDays(10), 1);
+        upsertTier(preSaleTierId, preSaleShowId, "看台", "WH_A", 58000L, 500, 500);
+        detailCacheService.refreshFromDb(preSaleShowId);
+        gateEvaluator.clearLocalCaches();
+        showMetrics.resetCountersForTest();
+
+        for (int i = 0; i < 20; i++) {
+            ShowDetailVO d = showQueryService.getShowDetail(preSaleShowId);
+            assertEquals("PREPARING", d.getEntryState());
+        }
+        assertTrue(showMetrics.getGateAuthDbReads() <= 1L,
+                "20 detail reads before preheat must NOT trigger 20 t_show DB reads, actual=" + showMetrics.getGateAuthDbReads());
+
+        // === B. 在售 10002 连续 5 次座位图请求：静态布局仅查 1 次 t_seat，实时占用变更立即可见 ===
+        long seatShowId = LIVE_FOUR_STATE_SHOW;
+        long seatTierId = 20004L;
+        String zoneId = "HALL_A";
+        cleanupShowRedis(seatShowId, List.of(seatTierId), List.of(zoneId));
+        stringRedisTemplate.delete(RedisKeys.seatStaticLayout(seatShowId, zoneId, 1));
+        stringRedisTemplate.delete(RedisKeys.seatStaticLayout(seatShowId, zoneId, 2));
+        showTaskMapper.delete(new LambdaQueryWrapper<ShowTaskDO>().eq(ShowTaskDO::getShowId, seatShowId));
+        ShowDO show10002 = showMapper.selectById(seatShowId);
+        show10002.setSaleStatus("INIT");
+        show10002.setSaleConfigVersion(1);
+        show10002.setSaleStartTime(now.minusSeconds(2));
+        show10002.setSaleEndTime(now.plusHours(3));
+        showMapper.updateById(show10002);
+        detailCacheService.refreshFromDb(seatShowId);
+        assertEquals("READY", showPreheatService.preheat(seatShowId, 1).getTaskStatus());
+
+        seatMapQueryService.clearStaticLayoutCache();
+        showMetrics.resetCountersForTest();
+        for (int i = 0; i < 5; i++) {
+            if (i == 2) {
+                // 第 3 次前实时占用 offset 5，验证静态布局走缓存而实时占用始终直读 Redis Bitmap
+                stringRedisTemplate.opsForValue().setBit(RedisKeys.seatBitmap(seatShowId, zoneId), 5, true);
+            }
+            SeatMapVO map = seatMapQueryService.getZoneSeatMap(seatShowId, zoneId);
+            assertEquals(100, map.getSeats().size());
+            boolean seat5Selectable = map.getSeats().stream()
+                    .filter(s -> s.getSeatIndex() == 5).findFirst().orElseThrow().isSelectable();
+            if (i < 2) {
+                assertTrue(seat5Selectable);
+            } else {
+                assertFalse(seat5Selectable, "Real-time bitmap occupancy must reflect immediately");
+            }
+        }
+        assertEquals(1L, showMetrics.getSeatLayoutDbReads(),
+                "5 seat map queries must hit t_seat only once for static layout");
+
+        // === C. 详情页 SOLD_OUT / STOCK_UNAVAILABLE 与链路一「我的预约」状态 100% 一致（绝不误报 WAIT_FOR_SALE） ===
+        long fanUserId = 920900L;
+        reservationMapper.delete(new LambdaQueryWrapper<com.starshow.user.domain.entity.ReservationDO>()
+                .eq(com.starshow.user.domain.entity.ReservationDO::getUserId, fanUserId));
+        userIdentityMapper.delete(new LambdaQueryWrapper<UserIdentityDO>()
+                .eq(UserIdentityDO::getUserId, fanUserId));
+        userIdentityMapper.insert(UserIdentityDO.builder()
+                .userId(fanUserId).realNameCipher("cipher").idCardCipher("cipher")
+                .idCardMasked("1101**********9000").idCardHmac("hmac-soldout-sync-" + fanUserId)
+                .verifiedTime(now).deleted(0).build());
+        stringRedisTemplate.delete(RedisKeys.userVerified(fanUserId));
+        stringRedisTemplate.delete(RedisKeys.reservationBloom(seatShowId));
+        reservationService.reserve(fanUserId, seatShowId);
+
+        // 库存清零 -> 详情 SOLD_OUT，我的预约必须返回 entryState=SOLD_OUT & nextAction=WATCH_RESTOCK
+        stringRedisTemplate.opsForValue().set(RedisKeys.stock(seatShowId, seatTierId), "0");
+        gateEvaluator.invalidateLocalStockCache(seatShowId);
+        assertEquals("SOLD_OUT", showQueryService.getShowDetail(seatShowId).getEntryState());
+        MyReservationVO mySoldOut = reservationService.getMyReservation(fanUserId, seatShowId);
+        assertEquals("SOLD_OUT", mySoldOut.getEntryState());
+        assertFalse(mySoldOut.isEntryOpen());
+        assertEquals("WATCH_RESTOCK", mySoldOut.getNextAction());
+
+        // 删除库存键 -> 详情 STOCK_UNAVAILABLE，我的预约必须返回 entryState=STOCK_UNAVAILABLE & nextAction=RETRY_LATER
+        stringRedisTemplate.delete(RedisKeys.stock(seatShowId, seatTierId));
+        gateEvaluator.invalidateLocalStockCache(seatShowId);
+        assertEquals("STOCK_UNAVAILABLE", showQueryService.getShowDetail(seatShowId).getEntryState());
+        MyReservationVO myUnavailable = reservationService.getMyReservation(fanUserId, seatShowId);
+        assertEquals("STOCK_UNAVAILABLE", myUnavailable.getEntryState());
+        assertFalse(myUnavailable.isEntryOpen());
+        assertEquals("RETRY_LATER", myUnavailable.getNextAction());
+    }
+
     private void upsertShow(long showId, String title, String city, String seatMode, String saleStatus,
                             LocalDateTime saleStart, LocalDateTime saleEnd, int version) {
         ShowDO existing = showMapper.selectById(showId);
@@ -620,6 +785,7 @@ class Chain2LiveMiddlewareVerificationTest {
     }
 
     private void cleanupShowRedis(long showId, List<Long> tierIds, List<String> zoneIds) {
+        jdbcTemplate.update("DELETE FROM t_show_task WHERE show_id = ?", showId);
         stringRedisTemplate.delete(RedisKeys.showReady(showId));
         stringRedisTemplate.delete(RedisKeys.showDetail(showId));
         stringRedisTemplate.delete(RedisKeys.showDetailRebuildLock(showId));
@@ -629,6 +795,9 @@ class Chain2LiveMiddlewareVerificationTest {
         for (String zoneId : zoneIds) {
             stringRedisTemplate.delete(RedisKeys.seatBitmap(showId, zoneId));
             stringRedisTemplate.delete(RedisKeys.seatLayout(showId, zoneId));
+            for (int v = 1; v <= 5; v++) {
+                stringRedisTemplate.delete(RedisKeys.seatStaticLayout(showId, zoneId, v));
+            }
         }
     }
 }

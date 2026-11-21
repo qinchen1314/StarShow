@@ -118,6 +118,7 @@ class ShowPreheatAndScheduleTest {
                 .id(showId).saleStatus("PREHEATING").saleConfigVersion(1).build());
         when(redisScripts.blockForReschedule(eq(showId), eq(1), anyLong())).thenReturn(1L);
         when(showMapper.casUpdateSchedule(showId, 1, newStart, newEnd)).thenReturn(1);
+        when(showTaskMapper.casAcquireLease(anyLong(), anyString(), any(), any())).thenReturn(1);
         when(showReadFacade.getShowBasic(showId)).thenReturn(ShowBasicDTO.builder()
                 .showId(showId).saleStatus("INIT").saleConfigVersion(2)
                 .saleStartTime(newStart).saleEndTime(newEnd).entryState("PREPARING").build());
@@ -129,9 +130,11 @@ class ShowPreheatAndScheduleTest {
         assertEquals("INIT", updated.getSaleStatus());
         verify(redisScripts).blockForReschedule(eq(showId), eq(1), anyLong());
         verify(showTaskMapper).cancelOutdatedTasks(showId, ShowTaskDO.TYPE_PREHEAT, 2);
+        verify(showTaskMapper).insert(any(ShowTaskDO.class));
         verify(redisScripts).publishRescheduled(eq(showId), eq(2), anyLong(), anyLong(), anyLong());
         verify(detailCacheService).refreshFromDb(showId);
         verify(reservationRescheduleFacade).rescheduleShowReminders(showId);
+        verify(showTaskMapper).casMarkSucceeded(anyLong(), anyString());
     }
 
     @Test

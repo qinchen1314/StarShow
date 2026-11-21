@@ -15,6 +15,7 @@ param(
     [ValidateSet("monolith", "distributed")]
     [string]$Mode = "monolith",
     [switch]$VerifyMissingSecrets,
+    [switch]$FromPhase1Schema,
     [string]$MysqlContainer = "starshow-mysql",
     [string]$RedisContainer = "starshow-redis",
     [string]$TestDatabase = "",
@@ -217,16 +218,45 @@ try {
     $defaultShowSnapshotBefore = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -D starshow -e "SELECT COUNT(*), IFNULL(SUM(id),0) FROM t_show;").Trim()
     Write-Output "[PASS] Placed default DB & Redis DB 0 sentinels (defaultShowSnapshot='$defaultShowSnapshotBefore')"
 
-    # --- 4. 创建本轮隔离库并导入最新 Schema & Seed ---
+    # --- 4. 创建本轮隔离库并导入 Schema & Seed（支持全新建库或从 Phase 1 存量库平滑无损升级） ---
     docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -e "CREATE DATABASE ``$TestDatabase`` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
     $createdDatabase = $true
-    $schemaSql = (Get-Content -Raw -Encoding UTF8 "docker/mysql/init/01_schema.sql") -replace "(?i)CREATE DATABASE IF NOT EXISTS\s+``?starshow``?[^;]*;", "" -replace "(?i)USE\s+``?starshow``?;", "USE ``$TestDatabase``;"
-    $seedSql = (Get-Content -Raw -Encoding UTF8 "docker/mysql/init/02_seed.sql") -replace "(?i)USE\s+``?starshow``?;", "USE ``$TestDatabase``;"
-    $schemaSql | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
-    $seedSql | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
+    if ($FromPhase1Schema) {
+        Write-Output "=== Initializing Phase 1 Legacy Schema (050eb5e) + Existing User/Reservation Data & Running V2 Migration ==="
+        $p1Schema = ((git show "050eb5e:docker/mysql/init/01_schema.sql") -join "`n") -replace "(?i)CREATE DATABASE IF NOT EXISTS\s+``?starshow``?[^;]*;", "" -replace "(?i)USE\s+``?starshow``?;", "USE ``$TestDatabase``;"
+        $p1Seed = ((git show "050eb5e:docker/mysql/init/02_seed.sql") -join "`n") -replace "(?i)USE\s+``?starshow``?;", "USE ``$TestDatabase``;"
+        $p1Schema | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
+        $p1Seed | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
 
-    $tableCount = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -D $TestDatabase -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$TestDatabase';").Trim()
-    Assert-Eq $tableCount "20" "Isolated DB '$TestDatabase' initialized with 20 physical tables (including t_show_task)"
+        # 写入模拟存量 Phase 1 用户、实名与预约记录，验证升级全程零丢数据
+        docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -D $TestDatabase -e "INSERT INTO t_user(id, phone, password_hash, nickname) VALUES (880001, '13800008801', 'legacy-bcrypt-hash', 'LegacyFan'); INSERT INTO t_reservation(id, user_id, show_id, remind_status, remind_config_version) VALUES (880101, 880001, 10003, 3, 1);"
+        $hasTaskBefore = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$TestDatabase' AND table_name='t_show_task';").Trim()
+        Assert-Eq $hasTaskBefore "0" "Legacy Phase 1 DB indeed lacks t_show_task before migration"
+
+        # 连续执行两遍 V2 迁移脚本，验证无损升级与 100% 幂等可重入
+        $migSql = Get-Content -Raw -Encoding UTF8 "docker/mysql/migrations/V2__phase2_show_inventory.sql"
+        $migSql | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
+        $migSql | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
+
+        $legacyUserKept = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -D $TestDatabase -e "SELECT COUNT(*) FROM t_user WHERE id=880001;").Trim()
+        $legacyRsvKept = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -D $TestDatabase -e "SELECT COUNT(*) FROM t_reservation WHERE id=880101 AND user_id=880001 AND show_id=10003;").Trim()
+        $migratedSegs = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -D $TestDatabase -e "SELECT COUNT(*) FROM t_seat WHERE show_id=10002 AND zone_id='HALL_A' AND segment_id LIKE 'R%-%';").Trim()
+        Assert-Eq $legacyUserKept "1" "Legacy Phase 1 user preserved 100% after V2 migration"
+        Assert-Eq $legacyRsvKept "1" "Legacy Phase 1 reservation preserved 100% after V2 migration"
+        Assert-Eq $migratedSegs "100" "Legacy 10002 HALL_A 100 seats backfilled with real aisle segment_id"
+    } else {
+        $schemaSql = (Get-Content -Raw -Encoding UTF8 "docker/mysql/init/01_schema.sql") -replace "(?i)CREATE DATABASE IF NOT EXISTS\s+``?starshow``?[^;]*;", "" -replace "(?i)USE\s+``?starshow``?;", "USE ``$TestDatabase``;"
+        $seedSql = (Get-Content -Raw -Encoding UTF8 "docker/mysql/init/02_seed.sql") -replace "(?i)USE\s+``?starshow``?;", "USE ``$TestDatabase``;"
+        $schemaSql | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
+        $seedSql | docker exec -i -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql --default-character-set=utf8mb4 -uroot $TestDatabase
+    }
+
+    $tableCount = [int](docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -D $TestDatabase -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$TestDatabase';").Trim()
+    Assert-True ($tableCount -ge 20) "Isolated DB '$TestDatabase' initialized with >= 20 physical tables (actual=$tableCount)"
+    $hasShowTask = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$TestDatabase' AND table_name='t_show_task';").Trim()
+    $hasSegmentCol = (docker exec -e MYSQL_PWD=$env:MYSQL_PASSWORD $MysqlContainer mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$TestDatabase' AND table_name='t_seat' AND column_name='segment_id';").Trim()
+    Assert-Eq $hasShowTask "1" "Isolated DB contains t_show_task"
+    Assert-Eq $hasSegmentCol "1" "Isolated DB contains t_seat.segment_id"
 
     # 将 10002 重置为未开售 INIT 便于完整实测 PREPARING -> OPEN -> 503 B0201 -> SOLD_OUT -> ENDED
     $futureStart = (Get-Date).AddHours(2).ToString("yyyy-MM-dd HH:mm:ss")
@@ -452,7 +482,16 @@ try {
 
     $myV3Open = ((Invoke-CurlApi -Method GET -Url "$gwUrl/api/v1/reservations/10003/me" -Headers $authHdrs).Body | ConvertFrom-Json).data
     Assert-Eq $myV3Open.entryOpen "True" "Chain1 /me entryOpen=true synchronized with Show 10003 READY"
+    Assert-Eq $myV3Open.entryState "OPEN" "Chain1 /me entryState=OPEN"
     Assert-Eq $myV3Open.nextAction "ENTER_SECKILL" "Chain1 /me nextAction=ENTER_SECKILL"
+
+    # 验证 10003 真实零余量时，详情页与「我的预约」一致呈 SOLD_OUT / WATCH_RESTOCK（绝不误返 WAIT_FOR_SALE）
+    docker exec -e REDISCLI_AUTH=$env:REDIS_PASSWORD $RedisContainer redis-cli -n $TestRedisDb SET "starshow:stock:{10003}:20005" 0 | Out-Null
+    $detail10003SoldOut = ((Invoke-CurlApi -Method GET -Url "$gwUrl/api/v1/shows/10003").Body | ConvertFrom-Json).data
+    Assert-Eq $detail10003SoldOut.entryState "SOLD_OUT" "Show 10003 detail entryState=SOLD_OUT"
+    $myV3SoldOut = ((Invoke-CurlApi -Method GET -Url "$gwUrl/api/v1/reservations/10003/me" -Headers $authHdrs).Body | ConvertFrom-Json).data
+    Assert-Eq $myV3SoldOut.entryState "SOLD_OUT" "Chain1 /me entryState=SOLD_OUT aligned with detail"
+    Assert-Eq $myV3SoldOut.nextAction "WATCH_RESTOCK" "Chain1 /me nextAction=WATCH_RESTOCK (not WAIT_FOR_SALE)"
 
     # --- 9. 验证默认库与 Redis DB 0 哨兵 100% 完好 ---
     $sentinelAfter = (docker exec -e REDISCLI_AUTH=$env:REDIS_PASSWORD $RedisContainer redis-cli -n 0 GET $sentinelRedisKey).Trim()

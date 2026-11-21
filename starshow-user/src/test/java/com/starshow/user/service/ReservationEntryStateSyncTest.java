@@ -85,6 +85,7 @@ class ReservationEntryStateSyncTest {
                 .build());
         MyReservationVO preparing = reservationService.getMyReservation(userId, showId);
         assertFalse(preparing.isEntryOpen());
+        assertEquals("PREPARING", preparing.getEntryState());
         assertEquals("WAIT_FOR_SALE", preparing.getNextAction());
         assertEquals(2, preparing.getSaleConfigVersion());
 
@@ -100,9 +101,41 @@ class ReservationEntryStateSyncTest {
                 .build());
         MyReservationVO open = reservationService.getMyReservation(userId, showId);
         assertTrue(open.isEntryOpen());
+        assertEquals("OPEN", open.getEntryState());
         assertEquals("ENTER_SECKILL", open.getNextAction());
 
-        // 3. 权威 entryState=ENDED -> entryOpen=false, nextAction=SALE_ENDED
+        // 3. 权威 entryState=SOLD_OUT -> 绝不能误报 WAIT_FOR_SALE，必须返回 WATCH_RESTOCK 与清晰回流提示
+        when(showReadFacade.getShowBasic(showId)).thenReturn(ShowBasicDTO.builder()
+                .showId(showId)
+                .title("星演跨年盛典")
+                .saleStartTime(LocalDateTime.now().minusMinutes(5))
+                .saleEndTime(LocalDateTime.now().plusHours(2))
+                .saleStatus("ON_SALE")
+                .saleConfigVersion(2)
+                .entryState("SOLD_OUT")
+                .build());
+        MyReservationVO soldOut = reservationService.getMyReservation(userId, showId);
+        assertFalse(soldOut.isEntryOpen());
+        assertEquals("SOLD_OUT", soldOut.getEntryState());
+        assertEquals("WATCH_RESTOCK", soldOut.getNextAction());
+        assertTrue(soldOut.getNextActionHint().contains("可能"));
+
+        // 4. 权威 entryState=STOCK_UNAVAILABLE -> 必须返回 RETRY_LATER，不误报 WAIT_FOR_SALE 或 SOLD_OUT
+        when(showReadFacade.getShowBasic(showId)).thenReturn(ShowBasicDTO.builder()
+                .showId(showId)
+                .title("星演跨年盛典")
+                .saleStartTime(LocalDateTime.now().minusMinutes(5))
+                .saleEndTime(LocalDateTime.now().plusHours(2))
+                .saleStatus("ON_SALE")
+                .saleConfigVersion(2)
+                .entryState("STOCK_UNAVAILABLE")
+                .build());
+        MyReservationVO unavailable = reservationService.getMyReservation(userId, showId);
+        assertFalse(unavailable.isEntryOpen());
+        assertEquals("STOCK_UNAVAILABLE", unavailable.getEntryState());
+        assertEquals("RETRY_LATER", unavailable.getNextAction());
+
+        // 5. 权威 entryState=ENDED -> entryOpen=false, nextAction=SALE_ENDED
         when(showReadFacade.getShowBasic(showId)).thenReturn(ShowBasicDTO.builder()
                 .showId(showId)
                 .title("星演跨年盛典")
@@ -114,6 +147,7 @@ class ReservationEntryStateSyncTest {
                 .build());
         MyReservationVO ended = reservationService.getMyReservation(userId, showId);
         assertFalse(ended.isEntryOpen());
+        assertEquals("ENDED", ended.getEntryState());
         assertEquals("SALE_ENDED", ended.getNextAction());
     }
 

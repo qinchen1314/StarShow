@@ -26,6 +26,8 @@ public class ShowMetrics {
     private final AtomicLong preheatLastDurationMs = new AtomicLong();
     private final AtomicLong stockMissingKeyCount = new AtomicLong();
     private final AtomicLong stockSoldOutResponseCount = new AtomicLong();
+    private final AtomicLong gateAuthDbReads = new AtomicLong();
+    private final AtomicLong seatLayoutDbReads = new AtomicLong();
 
     private final Counter l1HitCounter;
     private final Counter l2HitCounter;
@@ -38,6 +40,8 @@ public class ShowMetrics {
     private final Counter preheatFailureCounter;
     private final Counter stockMissingCounter;
     private final Counter stockSoldOutCounter;
+    private final Counter gateAuthDbReadCounter;
+    private final Counter seatLayoutDbReadCounter;
 
     public ShowMetrics(ObjectProvider<MeterRegistry> meterRegistryProvider) {
         MeterRegistry registry = meterRegistryProvider != null ? meterRegistryProvider.getIfAvailable() : null;
@@ -53,6 +57,8 @@ public class ShowMetrics {
             this.preheatFailureCounter = registry.counter("starshow.show.preheat.failure");
             this.stockMissingCounter = registry.counter("starshow.show.stock.missing.key");
             this.stockSoldOutCounter = registry.counter("starshow.show.stock.sold_out");
+            this.gateAuthDbReadCounter = registry.counter("starshow.show.gate.auth.db.read");
+            this.seatLayoutDbReadCounter = registry.counter("starshow.show.seat.layout.db.read");
             registry.gauge("starshow.show.preheat.last_duration_ms", preheatLastDurationMs);
         } else {
             this.l1HitCounter = null;
@@ -66,6 +72,8 @@ public class ShowMetrics {
             this.preheatFailureCounter = null;
             this.stockMissingCounter = null;
             this.stockSoldOutCounter = null;
+            this.gateAuthDbReadCounter = null;
+            this.seatLayoutDbReadCounter = null;
         }
     }
 
@@ -130,6 +138,16 @@ public class ShowMetrics {
         inc(stockSoldOutCounter);
     }
 
+    public void recordGateAuthDbRead() {
+        gateAuthDbReads.incrementAndGet();
+        inc(gateAuthDbReadCounter);
+    }
+
+    public void recordSeatLayoutDbRead() {
+        seatLayoutDbReads.incrementAndGet();
+        inc(seatLayoutDbReadCounter);
+    }
+
     public long getDetailL1Hits() {
         return detailL1Hits.get();
     }
@@ -178,6 +196,14 @@ public class ShowMetrics {
         return stockSoldOutResponseCount.get();
     }
 
+    public long getGateAuthDbReads() {
+        return gateAuthDbReads.get();
+    }
+
+    public long getSeatLayoutDbReads() {
+        return seatLayoutDbReads.get();
+    }
+
     public void resetCountersForTest() {
         detailL1Hits.set(0);
         detailL2Hits.set(0);
@@ -191,6 +217,8 @@ public class ShowMetrics {
         preheatLastDurationMs.set(0);
         stockMissingKeyCount.set(0);
         stockSoldOutResponseCount.set(0);
+        gateAuthDbReads.set(0);
+        seatLayoutDbReads.set(0);
     }
 
     private void inc(Counter counter) {

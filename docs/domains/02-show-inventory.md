@@ -181,5 +181,12 @@ sequenceDiagram
   - `10002` 10×10 座位图 MSB 解码与走道 `R1-L / R1-M / R1-R ... R10-R` 准确，四态（`PREPARING` / 缺键 `503/B0201` / 真实零余量 `200/SOLD_OUT` / `ENDED`）零混淆；
   - `10003` 推迟与提前改期闭环验证链路一 `SCHEDULE_CHANGED` 通知、详情页、我的预约 `entryOpen` 与预热/开售版本 100% 一致。
 - **双形态原始发行包隔离 E2E**（`scripts/verify-chain2-e2e.ps1`）：
-  - `monolith`（`starshow-boot-all` + `starshow-gateway`，含缺失密钥启动拒绝门禁）全绿，默认 MySQL `starshow` 与 Redis DB 0 哨兵 100% 完好；
+  - `monolith -FromPhase1Schema`（从 Phase 1 原库 `050eb5e` + 模拟存量用户/预约经 `docker/mysql/migrations/V2__phase2_show_inventory.sql` 幂等无损升级后实跑，含缺失密钥启动拒绝门禁）全绿，存量用户/预约 100% 保留、`10002` 走道分段回填完整、默认 MySQL `starshow` 与 Redis DB 0 哨兵 100% 完好；
   - `distributed`（`starshow-show-exec.jar` 零补丁冷启动 + `starshow-user-exec.jar` 真实 OpenFeign 双向联调 + `starshow-gateway`）全绿，公网网关零写路由，默认库哨兵 100% 完好。
+- **复验整改闭环（2026-11-20 补强）**：
+  - 存量库升级：新增幂等迁移脚本 `docker/mysql/migrations/V2__phase2_show_inventory.sql`，实证从 Phase 1 原库保留数据无损升级并二次重跑幂等通过；
+  - 改期同事务待办：`ShowScheduleService` 将 DB CAS 升版本、取消旧任务与写入 `t_show_task(RESCHEDULE_SYNC, PENDING)` 纳入同一本地事务，实证提交后中断可由 `ShowTaskRecoveryScheduler` 完整收敛 Redis、L2 详情与 `SCHEDULE_CHANGED` 通知；
+  - 读流量防护：`ShowGateEvaluator` 合并开票前无 `ready` 态权威回源（20 次详情浏览 `gateAuthDbReads <= 1`），`SeatMapQueryService` 按 `(showId, zoneId, layoutVersion)` 两级缓存静态座位布局（5 次在售选座 `seatLayoutDbReads == 1` 且实时位图占座立即生效）；
+  - 预约状态对齐：`GET /api/v1/reservations/{showId}/me` 输出 `entryState` 与 `nextActionHint`，`SOLD_OUT -> WATCH_RESTOCK`、`STOCK_UNAVAILABLE -> RETRY_LATER`，绝不再把售罄误报为 `WAIT_FOR_SALE`。
+
+2026-11-21 低内存复验执行了 7 项真实中间件测试，覆盖改期事务提交后续跑、开票前权威回源、静态座位图缓存与实时占用读。座位图共享回源超时或数据库不可用时返回 `503/B0201` 并建议稍后刷新。只有查询已完成且确实没有该分区时才返回分区不存在。

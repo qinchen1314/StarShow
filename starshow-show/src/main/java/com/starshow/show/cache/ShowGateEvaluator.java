@@ -26,23 +26,34 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 链路二权威开售门禁与四态状态机评估器：
  * 1. 毫秒级准点开售：只要 starshow:show:ready:{showId} 处于 READY/OPEN 且服务端绝对时间在 [saleStartEpochMs, saleEndEpochMs) 内，
  *    入口即刻开放，绝不等待后台定时任务唤醒；
- * 2. 严格区分四态（PREPARING / OPEN / SOLD_OUT / STOCK_UNAVAILABLE / ENDED），已开售期 Redis 键缺失或异常严禁误报 SOLD_OUT；
- * 3. 可选支持 stock-local-ttl-ms 短时进程内余票快照（仅用于浏览读，保护 Redis 热点分片）。
+ * 2. 严格区分五态（PREPARING / OPEN / SOLD_OUT / STOCK_UNAVAILABLE / ENDED），已开售期 Redis 键缺失或异常严禁误报 SOLD_OUT；
+ * 3. 当 Redis ready 尚未初始化时，优先复用刚刷新的新鲜详情快照，否则经 Caffeine 短缓存（5s）+ SingleFlight 合并回源，
+ *    杜绝开票前热点浏览造成逐次 t_show 行读；改期/预热/生命周期变更时会写入 Redis ready 并主动失效本地短缓存；
+ * 4. 可选支持 stock-local-ttl-ms 短时进程内余票快照（仅用于浏览读，保护 Redis 热点分片）。
  */
 @Slf4j
 @Component
 public class ShowGateEvaluator {
+
+    private static final long AUTH_META_FRESH_WINDOW_MS = 5_000L;
+    private static final long AUTH_META_WAIT_TIMEOUT_MS = 500L;
 
     private final ObjectProvider<ShowRedisScripts> redisScriptsProvider;
     private final ObjectProvider<StringRedisTemplate> stringRedisTemplateProvider;
     private final ShowMapper showMapper;
     private final ShowProperties properties;
     private final ShowMetrics metrics;
+
+    private final Cache<Long, AuthoritativeShowMeta> authMetaCache;
+    private final ConcurrentHashMap<Long, CompletableFuture<AuthoritativeShowMeta>> authMetaInFlight = new ConcurrentHashMap<>();
 
     private volatile Cache<Long, LocalStockSnapshot> localStockCache;
     private volatile long configuredLocalStockTtlMs = -1L;
@@ -57,12 +68,26 @@ public class ShowGateEvaluator {
         this.showMapper = showMapper;
         this.properties = properties;
         this.metrics = metrics;
+        this.authMetaCache = Caffeine.newBuilder()
+                .maximumSize(5000)
+                .expireAfterWrite(Duration.ofMillis(AUTH_META_FRESH_WINDOW_MS))
+                .build();
     }
 
     /**
-     * 结合静态详情快照与 Redis 权威热态，实时计算场次入口状态与各票档余量状态
+     * 结合静态详情快照与 Redis 权威热态，实时计算场次入口状态与各票档余量状态（默认开启开票前权威元信息合并缓存）
      */
     public GateEvaluation evaluate(ShowDetailCachePayload detail, long nowMs, boolean allowLocalStockCache) {
+        return evaluate(detail, nowMs, allowLocalStockCache, true);
+    }
+
+    /**
+     * 结合静态详情快照与 Redis 权威热态，实时计算场次入口状态与各票档余量状态：
+     * - coalesceAuthMeta=true（公网浏览路径）：ready 未初始化时复用 5s 新鲜快照或经 Caffeine+SingleFlight 合并，杜绝逐次读库；
+     * - coalesceAuthMeta=false（内部强一致调度路径）：ready 存在仍直读 Redis，ready 缺失时直查权威 DB 保障即时可见。
+     */
+    public GateEvaluation evaluate(ShowDetailCachePayload detail, long nowMs,
+                                   boolean allowLocalStockCache, boolean coalesceAuthMeta) {
         long showId = detail.getShowId();
         List<ShowDetailCachePayload.CachedTier> tiers = detail.getTiers() == null ? Collections.emptyList() : detail.getTiers();
 
@@ -81,7 +106,7 @@ public class ShowGateEvaluator {
             redisHealthy = false;
         }
 
-        // 2. 解析权威版本与开售/停售时间戳（绝不盲信陈旧详情副本）
+        // 2. 解析权威版本与开售/停售时间戳（绝不盲信陈旧详情副本，同时避免无 ready 时的逐次 DB 回源）
         int version = detail.getSaleConfigVersion() == null ? 1 : detail.getSaleConfigVersion();
         long saleStartMs = detail.getSaleStartEpochMs() == null ? 0L : detail.getSaleStartEpochMs();
         long saleEndMs = detail.getSaleEndEpochMs() == null ? 0L : detail.getSaleEndEpochMs();
@@ -104,14 +129,30 @@ public class ShowGateEvaluator {
             } else if (ShowReadyState.STAGE_PREPARING.equals(ready.getStage())) {
                 saleStatus = "PREHEATING";
             }
-        } else if (ready == null && redisHealthy && ("INIT".equals(saleStatus) || "PREHEATING".equals(saleStatus) || "PREHEATED".equals(saleStatus))) {
-            // ready 尚未初始化时轻量确认权威配置，防止改期后详情快照未及时同步
-            ShowDO authoritative = showMapper.selectById(showId);
-            if (authoritative != null) {
-                version = authoritative.getSaleConfigVersion() == null ? 1 : authoritative.getSaleConfigVersion();
-                saleStartMs = ShowTimeUtil.toEpochMs(authoritative.getSaleStartTime());
-                saleEndMs = ShowTimeUtil.toEpochMs(authoritative.getSaleEndTime());
-                saleStatus = authoritative.getSaleStatus() == null ? "INIT" : authoritative.getSaleStatus().toUpperCase();
+        } else if (ready == null && redisHealthy
+                && ("INIT".equals(saleStatus) || "PREHEATING".equals(saleStatus) || "PREHEATED".equals(saleStatus))) {
+            if (coalesceAuthMeta) {
+                // 公网浏览路径：优先复用 5s 内新鲜刷新的详情快照；否则经 Caffeine 5s 短缓存 + SingleFlight 合并回源
+                boolean detailJustRefreshed = detail.getRefreshedAtEpochMs() > 0L
+                        && (nowMs - detail.getRefreshedAtEpochMs()) <= AUTH_META_FRESH_WINDOW_MS;
+                if (!detailJustRefreshed) {
+                    AuthoritativeShowMeta authoritative = getAuthoritativeMetaCoalesced(showId);
+                    if (authoritative != null) {
+                        version = authoritative.saleConfigVersion();
+                        saleStartMs = authoritative.saleStartEpochMs();
+                        saleEndMs = authoritative.saleEndEpochMs();
+                        saleStatus = authoritative.saleStatus();
+                    }
+                }
+            } else {
+                // 内部 Facade 强一致路径：ready 未初始化时直接读取权威 DB 元信息
+                ShowDO authoritative = showMapper.selectById(showId);
+                if (authoritative != null) {
+                    version = authoritative.getSaleConfigVersion() == null ? 1 : authoritative.getSaleConfigVersion();
+                    saleStartMs = ShowTimeUtil.toEpochMs(authoritative.getSaleStartTime());
+                    saleEndMs = ShowTimeUtil.toEpochMs(authoritative.getSaleEndTime());
+                    saleStatus = authoritative.getSaleStatus() == null ? "INIT" : authoritative.getSaleStatus().toUpperCase();
+                }
             }
         }
 
@@ -224,9 +265,64 @@ public class ShowGateEvaluator {
     }
 
     public void invalidateLocalStockCache(long showId) {
+        authMetaCache.invalidate(showId);
         Cache<Long, LocalStockSnapshot> cache = this.localStockCache;
         if (cache != null) {
             cache.invalidate(showId);
+        }
+    }
+
+    public void clearLocalCaches() {
+        authMetaCache.invalidateAll();
+        Cache<Long, LocalStockSnapshot> cache = this.localStockCache;
+        if (cache != null) {
+            cache.invalidateAll();
+        }
+    }
+
+    private AuthoritativeShowMeta getAuthoritativeMetaCoalesced(long showId) {
+        AuthoritativeShowMeta cached = authMetaCache.getIfPresent(showId);
+        if (cached != null) {
+            return cached;
+        }
+
+        CompletableFuture<AuthoritativeShowMeta> created = new CompletableFuture<>();
+        CompletableFuture<AuthoritativeShowMeta> existing = authMetaInFlight.putIfAbsent(showId, created);
+        if (existing != null) {
+            try {
+                return existing.get(AUTH_META_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            } catch (Exception ex) {
+                log.debug("Coalesced auth-meta wait skipped for showId={}: {}", showId, ex.getMessage());
+                return null;
+            }
+        }
+
+        try {
+            AuthoritativeShowMeta doubleChecked = authMetaCache.getIfPresent(showId);
+            if (doubleChecked != null) {
+                created.complete(doubleChecked);
+                return doubleChecked;
+            }
+            metrics.recordGateAuthDbRead();
+            ShowDO authoritative = showMapper.selectById(showId);
+            AuthoritativeShowMeta meta = null;
+            if (authoritative != null) {
+                meta = new AuthoritativeShowMeta(
+                        authoritative.getSaleConfigVersion() == null ? 1 : authoritative.getSaleConfigVersion(),
+                        ShowTimeUtil.toEpochMs(authoritative.getSaleStartTime()),
+                        ShowTimeUtil.toEpochMs(authoritative.getSaleEndTime()),
+                        authoritative.getSaleStatus() == null ? "INIT" : authoritative.getSaleStatus().toUpperCase()
+                );
+                authMetaCache.put(showId, meta);
+            }
+            created.complete(meta);
+            return meta;
+        } catch (Throwable ex) {
+            created.completeExceptionally(ex);
+            log.warn("Failed to load authoritative show meta for showId={}: {}", showId, ex.getMessage());
+            return null;
+        } finally {
+            authMetaInFlight.remove(showId, created);
         }
     }
 
@@ -334,10 +430,13 @@ public class ShowGateEvaluator {
         return switch (state) {
             case PREPARING -> "开售准备中，请按官方开售时间准时抢票";
             case OPEN -> "正在热售，立即购票";
-            case SOLD_OUT -> "当前暂无余票，如有未支付关单或退票将实时回流，请稍后刷新";
+            case SOLD_OUT -> "当前暂无余票，未支付关单或退票后可能有余票回流，请留意变化";
             case STOCK_UNAVAILABLE -> "库存暂不可用，请稍后刷新";
             case ENDED -> "本场演出已停止售票";
         };
+    }
+
+    private record AuthoritativeShowMeta(int saleConfigVersion, long saleStartEpochMs, long saleEndEpochMs, String saleStatus) {
     }
 
     private record LocalStockSnapshot(Map<Long, Integer> tierAvailable, long asOfEpochMs) {

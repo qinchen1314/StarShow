@@ -30,7 +30,16 @@ public class MyReservationVO {
     private String remindStatusLabel;
     private boolean entryOpen;
     /**
-     * 下一步业务引导：VERIFY_IDENTITY / RESERVE / WAIT_FOR_SALE / ENTER_SECKILL / SALE_ENDED
+     * 演出权威入口状态（与详情页完全对齐）：PREPARING / OPEN / SOLD_OUT / STOCK_UNAVAILABLE / ENDED
+     */
+    private String entryState;
+    /**
+     * 下一步业务引导：
+     * VERIFY_IDENTITY / RESERVE / WAIT_FOR_SALE / ENTER_SECKILL / WATCH_RESTOCK / RETRY_LATER / SALE_ENDED
      */
     private String nextAction;
+    /**
+     * 面向用户展示的状态提示文案（与详情页保持一致，售罄不误导为未开售）
+     */
+    private String nextActionHint;
 }

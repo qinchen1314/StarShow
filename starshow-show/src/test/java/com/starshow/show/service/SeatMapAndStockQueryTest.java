@@ -205,7 +205,57 @@ class SeatMapAndStockQueryTest {
         ShowStockVO soldOutVo = stockQueryService.getShowStock(10002L);
         assertEquals("SOLD_OUT", soldOutVo.getEntryState());
         assertEquals(0, soldOutVo.getTiers().get(0).getAvailable());
+        assertTrue(soldOutVo.getTiers().get(0).getHint().contains("可能"));
         assertTrue(soldOutVo.getTiers().get(0).getHint().contains("回流"));
+    }
+
+    @Test
+    void shouldCoalescePreSaleAuthMetaReadsAndCacheVersionedStaticSeatLayout() {
+        long now = System.currentTimeMillis();
+        // 1. 详情快照超过 5s、且 Redis ready 尚未初始化：连续 20 次 evaluate 只应查 1 次 t_show
+        ShowDetailCachePayload preSaleDetail = ShowDetailCachePayload.builder()
+                .showId(10003L)
+                .saleConfigVersion(1)
+                .saleStatus("INIT")
+                .saleStartEpochMs(now + 3_600_000L)
+                .saleEndEpochMs(now + 7_200_000L)
+                .refreshedAtEpochMs(now - 30_000L)
+                .seatMode("AUTO_ALLOC")
+                .tiers(List.of())
+                .build();
+        when(redisScripts.readReadyState(10003L)).thenReturn(null);
+        when(showMapper.selectById(10003L)).thenReturn(com.starshow.show.domain.entity.ShowDO.builder()
+                .id(10003L).saleStatus("INIT").saleConfigVersion(1)
+                .saleStartTime(java.time.LocalDateTime.now().plusHours(1))
+                .saleEndTime(java.time.LocalDateTime.now().plusHours(2)).build());
+
+        for (int i = 0; i < 20; i++) {
+            ShowGateEvaluator.GateEvaluation eval = gateEvaluator.evaluate(preSaleDetail, now, true);
+            assertEquals(EntryState.PREPARING, eval.getEntryState());
+        }
+        verify(showMapper, times(1)).selectById(10003L);
+        assertEquals(1L, metrics.getGateAuthDbReads());
+
+        // 2. 在售选座 5 次请求：静态座位布局按 layoutVersion 缓存（t_seat 仅查 1 次），但 Redis Bitmap 仍每次 5/5 实时读取
+        ShowDetailCachePayload manualDetail = sampleManualShow(now - 5000, now + 60_000, "ON_SALE");
+        byte[] bitmap = new byte[1];
+        when(detailCacheService.getDetail(10002L)).thenReturn(manualDetail);
+        when(redisScripts.readReadyState(10002L)).thenReturn(ShowReadyState.builder()
+                .version(1).stage(ShowReadyState.STAGE_OPEN)
+                .saleStartEpochMs(now - 5000).saleEndEpochMs(now + 60_000).build());
+        when(valueOps.multiGet(List.of(RedisKeys.stock(10002L, 20004L)))).thenReturn(List.of("10"));
+        when(seatMapper.selectByShowAndZone(10002L, "HALL_A")).thenReturn(List.of(
+                SeatDO.builder().showId(10002L).tierId(20004L).zoneId("HALL_A").seatIndex(0).rowNo(1).colNo(1).segmentId("R1-L").status(0).build()
+        ));
+        when(redisScripts.readRawSeatBitmap(10002L, "HALL_A")).thenReturn(bitmap);
+
+        for (int i = 0; i < 5; i++) {
+            SeatMapVO vo = seatMapQueryService.getZoneSeatMap(10002L, "HALL_A");
+            assertTrue(vo.isAvailable());
+        }
+        verify(seatMapper, times(1)).selectByShowAndZone(10002L, "HALL_A");
+        verify(redisScripts, times(5)).readRawSeatBitmap(10002L, "HALL_A");
+        assertEquals(1L, metrics.getSeatLayoutDbReads());
     }
 
     private ShowDetailCachePayload sampleManualShow(long startMs, long endMs, String status) {
