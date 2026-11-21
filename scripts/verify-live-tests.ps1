@@ -1,10 +1,11 @@
 # Runs one live middleware suite against a disposable MySQL schema and empty Redis DB.
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("Chain1", "Chain2", "Chain3", "Chain4")]
+    [ValidateSet("Chain1", "Chain2", "Chain3", "Chain4", "Chain5")]
     [string]$Chain,
     [switch]$Distributed,
     [switch]$FromPhase2Schema,
+    [switch]$RefundCrash,
     [ValidateRange(1, 15)]
     [int]$TestRedisDb = 12,
     [string]$MysqlContainer = "starshow-mysql",
@@ -12,7 +13,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if (($Distributed -or $FromPhase2Schema) -and $Chain -ne 'Chain4') { throw "This option requires Chain4" }
+if (($Distributed -or $FromPhase2Schema -or $RefundCrash) -and $Chain -ne 'Chain4') { throw "This option requires Chain4" }
 $envKeyNames = @("MYSQL_PASSWORD", "REDIS_PASSWORD", "MYSQL_PWD", "REDISCLI_AUTH", "MYSQL_DATABASE", "MYSQL_PORT", "REDIS_PORT", "REDIS_DATABASE",
     "JAVA_TOOL_OPTIONS", "STARSHOW_JWT_SECRET", "STARSHOW_AES_KEY", "STARSHOW_IDCARD_PEPPER",
     "STARSHOW_INTERNAL_GATEWAY_SECRET", "STARSHOW_MOCK_PAY_SIGN_SECRET", "STARSHOW_TICKET_SIGN_SECRET")
@@ -57,7 +58,7 @@ try {
         $env:REDIS_PORT = $port.Split(":")[-1]
     }
     $env:REDIS_DATABASE = [string]$TestRedisDb
-    $env:JAVA_TOOL_OPTIONS = "-Xms32m -Xmx288m -Xss512k -XX:+UseSerialGC -XX:ActiveProcessorCount=4 -Dio.netty.eventLoopThreads=4 -Dspring.test.context.cache.maxSize=1"
+    $env:JAVA_TOOL_OPTIONS = "-Xms32m -Xmx288m -Xss512k -XX:+UseSerialGC -XX:ActiveProcessorCount=4 -Dio.netty.eventLoopThreads=4 -Dspring.test.context.cache.maxSize=1 -Duser.timezone=Asia/Shanghai"
     foreach ($secret in $envKeyNames | Where-Object { $_ -match 'SECRET$|PEPPER$|AES_KEY$' }) {
         [Environment]::SetEnvironmentVariable($secret, (New-TestSecret))
     }
@@ -105,14 +106,15 @@ try {
                 "-n", "rmqnamesrv:9876", "-c", "StarShowCluster", "-t", $topic) | Out-Null
         }
     }
-    $log = "starshow-boot-all/target/${Chain}-live.log"
+    $suite = if ($RefundCrash) { "RefundCrashRecoveryTest" } else { "${Chain}LiveMiddlewareVerificationTest" }
+    $log = "starshow-boot-all/target/$suite.log"
     New-Item -ItemType Directory -Force "starshow-boot-all/target" | Out-Null
     Write-Output "Running $Chain with Redis DB $TestRedisDb and a disposable MySQL schema"
-    $mavenArgs = @("-B", "-T", "1", "-pl", "starshow-boot-all", "-am", "-Dtest=${Chain}LiveMiddlewareVerificationTest",
+    $mavenArgs = @("-B", "-T", "1", "-pl", "starshow-boot-all", "-am", "-Dtest=$suite",
         "-Dsurefire.failIfNoSpecifiedTests=false", "-Dstarshow.live.enabled=true", "-DforkCount=1", "test")
     mvn @mavenArgs *> $log
     $result = $LASTEXITCODE
-    Select-String -Path $log -Pattern 'Tests run:|BUILD (SUCCESS|FAILURE)|[Ll][23].*(passed|PASS|oversell)' | ForEach-Object Line
+    Select-String -Path $log -Pattern 'Tests run:|BUILD (SUCCESS|FAILURE)|[Ll][23].*(passed|PASS|oversell)|BENCH_(ENV|RESULT)|REFUND_CRASH_' | ForEach-Object Line
     if ($result -ne 0) { throw "$Chain exited with status $result. See $log" }
     if ($Distributed) {
         & "$PSScriptRoot/verify-chain4-distributed.ps1" -MysqlContainer $MysqlContainer -RedisContainer $RedisContainer

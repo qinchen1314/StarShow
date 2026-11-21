@@ -77,5 +77,5 @@ mvn clean test
 - [ ] **Phase 2 (`v0.3.0-chain2`)**：链路二（Caffeine L1 + Redis L2 逻辑过期 + 分区 Bitmap 座位图 + 开票预热）
 - [ ] **Phase 3 (`v0.4.0-chain3`)**：链路三（V1→V4 抢票策略引擎 + 事务消息防悬挂回查 + 基因分表）
 - [ ] **Phase 4 (`v0.5.0-chain4`)**：Mock 支付、关单、出票、退款 Saga 和四方对账已实现，核心验收通过。发布与剩余复验见 [进度账本](docs/PROGRESS.md)。
-- [ ] **Phase 5 (`v0.9.0-bench`)**：5,000 Token 池真实 V1→V4 压测（含 V4 E2E 排空耗时）与 Grafana 监控报告
+- [ ] **Phase 5 (`v0.9.0-bench`)**：已完成同一 5,001 用户的 V1～V4 基线压测，Grafana 与多实例复验待验收。[压测报告](docs/benchmarks/BENCHMARK_V1_TO_V4.md)
 - [ ] **Phase 6 (`v1.0.0-release`)**：零构建单页演示台与开源发布
