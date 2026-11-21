@@ -1,7 +1,6 @@
 package com.starshow.boot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.starshow.api.facade.OrderPaymentFacade;
 import com.starshow.common.auth.AuthHeaders;
 import com.starshow.common.config.StarShowSecurityProperties;
 import com.starshow.common.constant.RedisKeys;
@@ -28,6 +27,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.autoconfigure.web.servlet.MockMvcPrint;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
@@ -39,8 +39,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -58,7 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "starshow.seckill.timeout-dispatch-enabled=false", "starshow.seckill.pending-reconcile-enabled=false",
         "knife4j.enable=false"
 })
-@AutoConfigureMockMvc
+@AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @ActiveProfiles("monolith")
 class Chain4LiveMiddlewareVerificationTest {
     @Autowired JdbcTemplate jdbc;
@@ -103,8 +101,13 @@ class Chain4LiveMiddlewareVerificationTest {
         assertEquals(payNo, payments.create(order.orderNo(), order.userId()).payNo());
         payments.mockPay(payNo, order.userId(), Fault.DUPLICATE_3X);
         callback(payNo, 2);
-        orderJobs.dueActions();
-        await(() -> "TICKETED".equals(orders.find(order.orderNo()).getStatus()));
+        // The suite turns off periodic recovery. Drive the same scheduler so its durable
+        // retry runs if the broker has not assigned the ticket queue to this consumer yet.
+        await(() -> {
+            if ("TICKETED".equals(orders.find(order.orderNo()).getStatus())) return true;
+            orderJobs.dueActions();
+            return false;
+        });
         var view = orders.ticketView(order.orderNo(), order.userId());
         assertEquals(1, view.tickets().size());
         assertNotNull(view.tickets().getFirst().qrCodeToken());
@@ -275,9 +278,12 @@ class Chain4LiveMiddlewareVerificationTest {
     }
 
     private void await(BooleanSupplier condition) throws InterruptedException {
-        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
-        while (!condition.getAsBoolean() && System.nanoTime() < until) Thread.sleep(50);
-        assertTrue(condition.getAsBoolean());
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < until) {
+            if (condition.getAsBoolean()) return;
+            Thread.sleep(250);
+        }
+        fail("Ticket still unavailable after message delivery and scheduled recovery");
     }
 
     private record Purchase(long orderNo, long userId, long showId, long tierId, String table) {}

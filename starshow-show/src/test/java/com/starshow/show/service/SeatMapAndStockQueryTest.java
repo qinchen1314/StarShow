@@ -8,6 +8,7 @@ import com.starshow.show.cache.ShowGateEvaluator;
 import com.starshow.show.config.ShowMetrics;
 import com.starshow.show.config.ShowProperties;
 import com.starshow.show.domain.entity.SeatDO;
+import com.starshow.show.domain.entity.ShowDO;
 import com.starshow.show.domain.model.EntryState;
 import com.starshow.show.domain.model.ShowDetailCachePayload;
 import com.starshow.show.domain.model.ShowReadyState;
@@ -25,6 +26,9 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -224,10 +228,12 @@ class SeatMapAndStockQueryTest {
                 .tiers(List.of())
                 .build();
         when(redisScripts.readReadyState(10003L)).thenReturn(null);
-        when(showMapper.selectById(10003L)).thenReturn(com.starshow.show.domain.entity.ShowDO.builder()
+        ZoneId saleZone = ZoneId.of("Asia/Shanghai");
+        when(showMapper.selectById(10003L)).thenReturn(ShowDO.builder()
                 .id(10003L).saleStatus("INIT").saleConfigVersion(1)
-                .saleStartTime(java.time.LocalDateTime.now().plusHours(1))
-                .saleEndTime(java.time.LocalDateTime.now().plusHours(2)).build());
+                .saleStartTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(preSaleDetail.getSaleStartEpochMs()), saleZone))
+                .saleEndTime(LocalDateTime.ofInstant(Instant.ofEpochMilli(preSaleDetail.getSaleEndEpochMs()), saleZone))
+                .build());
 
         for (int i = 0; i < 20; i++) {
             ShowGateEvaluator.GateEvaluation eval = gateEvaluator.evaluate(preSaleDetail, now, true);

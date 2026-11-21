@@ -11,6 +11,13 @@ if ($env:MYSQL_DATABASE -notmatch '^starshow_c4_[0-9a-f]{12}$' -or [int]$env:RED
     throw "A dedicated Chain 4 database and non-default Redis DB are required"
 }
 
+# Use the JVM executable directly so Start-Process tracks the service on Windows.
+$javaHomeSetting = java -XshowSettings:properties -version 2>&1 |
+    ForEach-Object ToString | Where-Object { $_ -match '^\s*java\.home\s*=' }
+if (-not $javaHomeSetting) { throw "Unable to resolve the Java runtime directory" }
+$javaExe = Join-Path (($javaHomeSetting -split '=', 2)[1].Trim()) "bin/java.exe"
+if (-not (Test-Path -LiteralPath $javaExe -PathType Leaf)) { throw "Java runtime executable unavailable" }
+
 function Get-FreePort {
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     try {
@@ -55,7 +62,7 @@ function Start-ServiceJar([string]$module, [int]$port, [string[]]$extra) {
         "--starshow.payment.enabled=true", "--starshow.seckill.mq-enabled=false",
         "--starshow.seckill.timeout-dispatch-enabled=false", "--starshow.seckill.pending-reconcile-enabled=false") + $extra
     $logPrefix = "starshow-boot-all/target/phase4-distributed-$module"
-    $launch = @{ FilePath = "java"; ArgumentList = $arguments; WindowStyle = "Hidden"; PassThru = $true
+    $launch = @{ FilePath = $javaExe; ArgumentList = $arguments; WindowStyle = "Hidden"; PassThru = $true
         RedirectStandardOutput = "$logPrefix.out.log"; RedirectStandardError = "$logPrefix.err.log" }
     return Start-Process @launch
 }
@@ -120,6 +127,9 @@ try {
     Write-Output "[PASS] Distributed order and payment release jars. One ticket, one refund, two stock releases. Redis and MySQL stock both 2."
 } finally {
     foreach ($process in $started) {
-        if (-not $process.HasExited) { Stop-Process -InputObject $process }
+        if (-not $process.HasExited) {
+            Stop-Process -InputObject $process
+            if (-not $process.WaitForExit(5000)) { throw "Test JVM is still running: $($process.Id)" }
+        }
     }
 }
