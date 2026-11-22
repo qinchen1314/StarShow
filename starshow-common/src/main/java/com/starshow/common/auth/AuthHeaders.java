@@ -11,6 +11,7 @@ public final class AuthHeaders {
     public static final String X_USER_JTI = "X-User-Jti";
     public static final String X_USER_TOKEN_EXP = "X-User-Token-Exp";
     public static final String X_INTERNAL_GATEWAY_SECRET = "X-Internal-Gateway-Secret";
+    public static final String X_QUEUE_READ_TOKEN = "X-Queue-Read-Token";
 
     private AuthHeaders() {
     }

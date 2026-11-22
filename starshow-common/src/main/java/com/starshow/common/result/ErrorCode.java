@@ -54,6 +54,7 @@ public enum ErrorCode {
     LOCK_ACQUIRE_FAILED("B0102", "系统繁忙，请稍后重试"),
     MQ_SEND_FAILED("B0103", "下单消息投递失败，请稍后重试"),
     STOCK_UNAVAILABLE("B0201", "库存暂不可用，请稍后刷新"),
+    QUEUE_UNAVAILABLE("B0202", "候场暂不可用，请稍后刷新"),
     SYSTEM_ERROR("B9999", "系统内部异常");
 
     private final String code;

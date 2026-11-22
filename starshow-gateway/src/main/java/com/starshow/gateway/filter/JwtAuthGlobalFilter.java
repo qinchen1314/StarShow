@@ -46,6 +46,8 @@ import java.util.List;
 public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
 
     private static final PathPatternParser PARSER = new PathPatternParser();
+    private static final WhitelistRule QUEUE_READ = WhitelistRule.of(HttpMethod.GET, "/api/v1/shows/{showId}/queue/me");
+    private static final WhitelistRule QUEUE_JOIN = WhitelistRule.of(HttpMethod.POST, "/api/v1/shows/{showId}/queue");
 
     private static final List<WhitelistRule> WHITELIST_RULES = List.of(
             WhitelistRule.of(HttpMethod.POST, "/api/v1/auth/register"),
@@ -85,12 +87,18 @@ public class JwtAuthGlobalFilter implements GlobalFilter, Ordered {
         // 2. 按 (HttpMethod, PathPattern) 双向匹配白名单
         HttpMethod method = sanitizedRequest.getMethod();
         PathContainer path = sanitizedRequest.getPath().pathWithinApplication();
-        if (HttpMethod.OPTIONS.equals(method) || isWhitelisted(method, path)) {
+        boolean queueRead = QUEUE_READ.matches(method, path);
+        if (queueRead || QUEUE_JOIN.matches(method, path)) {
+            sanitizedExchange.getResponse().getHeaders().setCacheControl("no-store");
+        }
+        String authHeader = sanitizedRequest.getHeaders().getFirst(AuthHeaders.AUTHORIZATION);
+        String queueToken = sanitizedRequest.getHeaders().getFirst(AuthHeaders.X_QUEUE_READ_TOKEN);
+        boolean delegatedQueueRead = queueRead && authHeader == null && queueToken != null && !queueToken.isBlank();
+        if (HttpMethod.OPTIONS.equals(method) || delegatedQueueRead || (!queueRead && isWhitelisted(method, path))) {
             return chain.filter(sanitizedExchange);
         }
 
         // 3. 提取并校验 Bearer JWT
-        String authHeader = sanitizedRequest.getHeaders().getFirst(AuthHeaders.AUTHORIZATION);
         if (authHeader == null || !authHeader.startsWith(AuthHeaders.BEARER_PREFIX)) {
             return writeJsonError(sanitizedExchange, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHORIZED);
         }

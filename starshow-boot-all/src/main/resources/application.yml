@@ -24,6 +24,13 @@ rocketmq:
     group: pg-starshow-boot-all
 
 starshow:
+  waiting-room:
+    enabled: ${STARSHOW_WAITING_ROOM_ENABLED:false}
+    show-ids: ${STARSHOW_WAITING_ROOM_SHOW_IDS:}
+    redis-uri: ${STARSHOW_WAITING_ROOM_REDIS_URI:}
+    redis-password: ${STARSHOW_WAITING_ROOM_REDIS_PASSWORD:}
+    redis-database: ${STARSHOW_WAITING_ROOM_REDIS_DATABASE:0}
+    read-secret: ${STARSHOW_WAITING_ROOM_READ_SECRET:}
   payment:
     enabled: ${STARSHOW_PAYMENT_ENABLED:false}
     callback-secret: ${STARSHOW_MOCK_PAY_SIGN_SECRET:}

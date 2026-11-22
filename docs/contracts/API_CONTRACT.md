@@ -55,6 +55,10 @@
 | `POST /internal/shows/{showId}/preheat` | 按 `(showId, saleConfigVersion)` 幂等创建/查询预热任务，Fencing Token Lua 分批写入并全量回读校验后置 `READY`/`PREHEATED`，到 `saleStartTime` 毫秒级准点开放。 | 内部密钥（公网零路由） | ✅ Phase 2 已验收 |
 | `GET /internal/shows/{showId}/tiers/{tierId}/snapshot` | 返回用于下单校验的权威价格（分）、`saleConfigVersion`、`layoutVersion`、`maxTicketsPerOrder`、售卖窗口和座位模式。 | 内部密钥 | ✅ Phase 2 已验收 |
 | `GET /internal/shows/{showId}/zones/{zoneId}/seats/spec` | 返回分区物理座位列表、所属票档、排座号与走道连续段 `segmentId`（`distributed` 模式下供 `starshow-order` 自主选座与连座校验）。 | 内部密钥 | ✅ Phase 3 已验收 |
+| `POST /api/v1/shows/{showId}/queue` | 幂等加入或恢复本人候场，返回当前版本、状态与只读 `queueReadToken`。可带已显示的 `saleConfigVersion`。 | JWT，首入实名 | ISSUE-015 云端已验 |
+| `GET /api/v1/shows/{showId}/queue/me` | 查询本人 `WAITING`、`EXPIRED` 或 `ENDED`，返回服务器时钟及刷新建议。私有响应 `Cache-Control: no-store`。 | 本人 JWT 或本场记录的 `X-Queue-Read-Token` | ISSUE-015 云端已验 |
+
+候场版本变化返回当前开售版本和重新加入提示。详细状态、错误与重试规则见[独立候场设计](../domains/05-waiting-room.md)。
 
 ### 链路三：抢票下单引擎 V1~V4 (`starshow-order`)
 | 方法与路径 | 说明 | 鉴权 | 状态 |

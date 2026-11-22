@@ -15,6 +15,7 @@ import com.starshow.show.domain.entity.ShowTaskDO;
 import com.starshow.show.lua.ShowRedisScripts;
 import com.starshow.show.mapper.ShowMapper;
 import com.starshow.show.mapper.ShowTaskMapper;
+import com.starshow.show.queue.WaitingRoomScheduleProjection;
 import com.starshow.show.util.ShowTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -59,6 +60,12 @@ public class ShowScheduleService {
     private final GeneSnowflakeIdGenerator idGenerator;
     private final ShowProperties properties;
     private final TransactionTemplate transactionTemplate;
+    private WaitingRoomScheduleProjection waitingRoom;
+
+    @Autowired(required = false)
+    void setWaitingRoom(WaitingRoomScheduleProjection waitingRoom) {
+        this.waitingRoom = waitingRoom;
+    }
 
     @Autowired
     public ShowScheduleService(ShowMapper showMapper,
@@ -152,6 +159,20 @@ public class ShowScheduleService {
     public RescheduleCommitResult commitRescheduleWithOutbox(long showId,
                                                              LocalDateTime newSaleStartTime,
                                                              LocalDateTime newSaleEndTime) {
+        if (!hasWaitingRoom(showId)) {
+            return commitReschedule(showId, newSaleStartTime, newSaleEndTime);
+        }
+        RLock lock = acquireOpLock(showId);
+        try {
+            return commitReschedule(showId, newSaleStartTime, newSaleEndTime);
+        } finally {
+            releaseOpLock(lock);
+        }
+    }
+
+    private RescheduleCommitResult commitReschedule(long showId,
+                                                    LocalDateTime newSaleStartTime,
+                                                    LocalDateTime newSaleEndTime) {
         if (newSaleStartTime == null || newSaleEndTime == null || !newSaleEndTime.isAfter(newSaleStartTime)) {
             throw new BizException(ErrorCode.INVALID_PARAM, "停售时间必须晚于开售时间");
         }
@@ -166,6 +187,10 @@ public class ShowScheduleService {
 
         int expectedVersion = current.getSaleConfigVersion() == null ? 1 : current.getSaleConfigVersion();
         long nowMs = System.currentTimeMillis();
+
+        if (hasWaitingRoom(showId)) {
+            waitingRoom.pause(current);
+        }
 
         // 1. 先在 Redis 原子校验尚未进入开售窗口并将旧配置置为 BLOCKED，阻断在途预热与毫秒级开售
         if (redisScripts != null) {
@@ -272,6 +297,10 @@ public class ShowScheduleService {
             if (redisScripts != null) {
                 redisScripts.publishRescheduled(showId, targetVersion, newStartMs, newEndMs, System.currentTimeMillis());
             }
+            stage = "PUBLISH_WAITING_ROOM";
+            if (hasWaitingRoom(showId)) {
+                waitingRoom.publishCommitted(showId, targetVersion, saleStartTime, saleEndTime);
+            }
 
             // Step B: 覆盖刷新详情 L2 并清理本机 L1 / 权威短缓存 / 短库存缓存
             stage = "REFRESH_DETAIL_CACHE";
@@ -328,11 +357,16 @@ public class ShowScheduleService {
 
     private RLock acquireOpLock(long showId) {
         if (redissonClient == null) {
+            if (hasWaitingRoom(showId)) {
+                throw BizException.serviceUnavailable(ErrorCode.QUEUE_UNAVAILABLE, 2000, "场次操作锁暂不可用，请稍后重试");
+            }
             return null;
         }
         RLock lock = redissonClient.getLock(RedisKeys.showOpLock(showId));
         try {
-            boolean locked = lock.tryLock(properties.getShowOpLockWaitMs(), properties.getShowOpLockLeaseMs(), TimeUnit.MILLISECONDS);
+            boolean locked = hasWaitingRoom(showId)
+                    ? lock.tryLock(properties.getShowOpLockWaitMs(), TimeUnit.MILLISECONDS)
+                    : lock.tryLock(properties.getShowOpLockWaitMs(), properties.getShowOpLockLeaseMs(), TimeUnit.MILLISECONDS);
             if (!locked) {
                 throw new BizException(ErrorCode.LOCK_ACQUIRE_FAILED, "场次操作锁争用，请稍后重试");
             }
@@ -341,6 +375,10 @@ public class ShowScheduleService {
             Thread.currentThread().interrupt();
             throw new BizException(ErrorCode.LOCK_ACQUIRE_FAILED, "获取场次操作锁中断");
         }
+    }
+
+    private boolean hasWaitingRoom(long showId) {
+        return waitingRoom != null && waitingRoom.includes(showId);
     }
 
     private void releaseOpLock(RLock lock) {

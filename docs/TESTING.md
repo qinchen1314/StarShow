@@ -32,3 +32,15 @@ mvn -B -T 1 -pl starshow-boot-all -am \
 ```
 
 按 Issue 记录对应命令、实际执行环境和未验证项。关闭条件以实跑证据为准。[Issue 验收规范](./issues/README.md) · [压测口径](./benchmarks/BENCHMARK_V1_TO_V4.md)
+
+### ISSUE-015 候场隔离复验
+
+在云端临时目录为两套 Redis 分别分配回环端点。常规业务测试 Redis 与候场 Redis 使用独立实例和非零测试 DB。为候场实例保留本轮 AOF 目录，且固定回环端口。为 MySQL 使用 `starshow_queue_` 前缀的临时库。
+
+```bash
+mvn -o -B -T 1 -pl starshow-boot-all,starshow-gateway -am \
+  -Dtest=WaitingRoomLiveVerificationTest,QueueReadTokenTest,JwtAuthGlobalFilterTest,ShowScheduleServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false -Dstarshow.waiting-room.live=true -DforkCount=1 test
+```
+
+测试进程和故障驱动共享本轮的 `WAITING_ROOM_FAULT_DIR`。驱动在 `stop-queue` 出现后停止本轮候场实例并写入 `queue-offline`。收到 `start-queue` 后使用原端点和 AOF 目录启动候场实例，确认可连后写入 `queue-restored`。测试要求 HTTP 状态和两个买家的名次在同一个 10 秒窗口内恢复。后端结束后再用 `target/issue-015-evidence/waiting-room.json` 回放浏览器用例。

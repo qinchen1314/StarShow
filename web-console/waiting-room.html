@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>开售候场 · 星演票务</title>
+  <link rel="stylesheet" href="waiting-room.css">
+  <script type="module" src="waiting-room.mjs"></script>
+</head>
+<body>
+  <header><div class="wrap">星演票务</div></header>
+  <main class="wrap">
+    <h1>开售候场</h1>
+    <form id="show-form" class="show-form">
+      <label for="show-id">场次 ID</label>
+      <input id="show-id" inputmode="numeric" pattern="[1-9][0-9]{0,18}" required>
+      <button type="submit">查询场次</button>
+    </form>
+    <section id="room" class="panel" hidden>
+      <div aria-live="polite" aria-atomic="true">
+        <h2 id="state">候场准备中</h2>
+        <p id="message"></p>
+      </div>
+      <p id="sale" hidden></p>
+      <p class="rules">开售前加入的买家统一随机排序，开售后按入队先后排在该批之后。刷新或换设备登录可恢复本人的位置。</p>
+      <div class="actions">
+        <button id="join" class="primary" type="button" hidden>加入候场</button>
+        <button id="refresh" type="button" hidden>刷新状态</button>
+      </div>
+      <form id="login" class="login" hidden>
+        <h2>登录后加入或恢复候场</h2>
+        <label>手机号<input name="phone" type="tel" autocomplete="username" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">登录并进入候场</button>
+        <p id="login-message" role="status"></p>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

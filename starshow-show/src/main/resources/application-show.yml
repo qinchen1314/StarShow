@@ -17,6 +17,13 @@ spring:
       password: ${REDIS_PASSWORD:}
 
 starshow:
+  waiting-room:
+    enabled: ${STARSHOW_WAITING_ROOM_ENABLED:false}
+    show-ids: ${STARSHOW_WAITING_ROOM_SHOW_IDS:}
+    redis-uri: ${STARSHOW_WAITING_ROOM_REDIS_URI:}
+    redis-password: ${STARSHOW_WAITING_ROOM_REDIS_PASSWORD:}
+    redis-database: ${STARSHOW_WAITING_ROOM_REDIS_DATABASE:0}
+    read-secret: ${STARSHOW_WAITING_ROOM_READ_SECRET:}
   worker-id: ${STARSHOW_WORKER_ID:2}
   security:
     # 严禁回退公开默认值，必须通过环境变量注入

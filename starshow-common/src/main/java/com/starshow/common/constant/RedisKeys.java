@@ -62,6 +62,20 @@ public final class RedisKeys {
         return "starshow:lock:show_op:{" + showId + "}";
     }
 
+    // ---------- 独立候场 Redis ----------
+
+    public static String queueMeta(long showId) {
+        return "starshow:queue:{" + showId + "}:meta";
+    }
+
+    public static String queueGeneration(long showId, int version, String part) {
+        return "starshow:queue:{" + showId + "}:v:" + version + ":" + part;
+    }
+
+    public static String queueJoinLimit(long showId, long userId) {
+        return "starshow:queue:{" + showId + "}:join-limit:" + userId;
+    }
+
     public static String seatBitmap(long showId, String zoneId) {
         return "starshow:seat:bitmap:{" + showId + "}:" + zoneId;
     }

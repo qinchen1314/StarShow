@@ -52,3 +52,4 @@
 3. Phase 5 单实例八轮基线已跑通。下一轮加入网关、多实例、热票档倾斜、放票回流以及开票前读流量，定位 V4 在途积压并补齐大屏实证。
 4. [ISSUE-012](./issues/ISSUE-012-seckill-request-recovery.md)在云端真实 MySQL、Redis、RocketMQ 通过聚合态链路三 7 项验收，包括 200 路竞争与两处 JVM 强杀，另有提交索引清理补验通过。分布式发行包 HTTP E2E 待复验。
 5. [ISSUE-013](./issues/ISSUE-013-order-confirmation-experience.md)已完成。云端通过受影响模块 86 项单测、串行复跑 ISSUE-012 共 7 项，以及 ISSUE-013 的 120 秒延迟落库和支付保护窗剧本。浏览器验收与脱敏页面样例见原单。后续测试按[总测试说明](./TESTING.md)在云端串行执行。
+6. [ISSUE-015](./issues/ISSUE-015-waiting-room.md)完成云端隔离验收，后端 14 项、Firefox 页面 11 项通过。两个 JVM 的 200 路并发固定预排和后排顺序，Redis 故障期间暂停改期，重启后原队列 ID 与实际名次恢复。

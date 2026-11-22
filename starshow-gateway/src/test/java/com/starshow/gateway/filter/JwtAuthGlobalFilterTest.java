@@ -159,4 +159,42 @@ class JwtAuthGlobalFilterTest {
         assertNotNull(body);
         assertTrue(body.contains(ErrorCode.SYSTEM_ERROR.getCode()));
     }
+
+    @Test
+    void waitingRoomReadIsPrivateAndQueueCredentialCannotJoin() {
+        String queueUrl = "/api/v1/shows/15001/queue";
+        var without = MockServerWebExchange.from(MockServerHttpRequest.get(queueUrl + "/me").build());
+        filter.filter(without, ex -> { throw new AssertionError("Unauthenticated queue read"); }).block();
+        assertEquals(HttpStatus.UNAUTHORIZED, without.getResponse().getStatusCode());
+        assertEquals("no-store", without.getResponse().getHeaders().getCacheControl());
+
+        var read = MockServerWebExchange.from(MockServerHttpRequest.get(queueUrl + "/me")
+                .header(AuthHeaders.X_QUEUE_READ_TOKEN, "fixture-read-only")
+                .header(AuthHeaders.X_USER_ID, "999").build());
+        filter.filter(read, ex -> {
+            assertNull(ex.getRequest().getHeaders().getFirst(AuthHeaders.X_USER_ID));
+            assertEquals("fixture-read-only", ex.getRequest().getHeaders().getFirst(AuthHeaders.X_QUEUE_READ_TOKEN));
+            return Mono.empty();
+        }).block();
+        assertEquals("no-store", read.getResponse().getHeaders().getCacheControl());
+
+        var join = MockServerWebExchange.from(MockServerHttpRequest.post(queueUrl)
+                .header(AuthHeaders.X_QUEUE_READ_TOKEN, "fixture-read-only").build());
+        filter.filter(join, ex -> { throw new AssertionError("Queue credential attempted to join"); }).block();
+        assertEquals(HttpStatus.UNAUTHORIZED, join.getResponse().getStatusCode());
+        verifyNoInteractions(reactiveStringRedisTemplate);
+    }
+
+    @Test
+    void queueReadWithAnIdentityStillChecksTheJwtBlacklist() {
+        var token = jwtTokenProvider.generateToken(88001);
+        when(reactiveStringRedisTemplate.hasKey(RedisKeys.authBlacklist(token.jti()))).thenReturn(Mono.just(true));
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/shows/15001/queue/me")
+                .header(AuthHeaders.X_QUEUE_READ_TOKEN, "fixture-read-only")
+                .header(AuthHeaders.AUTHORIZATION, AuthHeaders.BEARER_PREFIX + token.token()).build());
+
+        filter.filter(exchange, ex -> { throw new AssertionError("Revoked JWT reached waiting room"); }).block();
+        assertEquals(HttpStatus.UNAUTHORIZED, exchange.getResponse().getStatusCode());
+        verify(reactiveStringRedisTemplate).hasKey(RedisKeys.authBlacklist(token.jti()));
+    }
 }
