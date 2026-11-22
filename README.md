@@ -63,10 +63,12 @@ docker compose -f docker/docker-compose.yml up -d
 > docker compose -f docker/docker-compose.yml -f docker/docker-compose.ops.yml --profile ops up -d
 > ```
 
-### 3. 编译并运行单元测试
+### 3. 在云服务器编译并运行单元测试
 ```bash
 mvn clean test
 ```
+
+云端验收的运行顺序、环境隔离和证据要求见[总测试说明](docs/TESTING.md)。
 
 ---
 

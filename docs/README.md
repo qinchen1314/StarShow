@@ -40,6 +40,10 @@
 
 ## 四、验收 Issue 与回执
 
+[总测试说明](./TESTING.md)记录后续测试的云端执行约定、串行顺序和验收入口。
+
 里程碑复核发现的缺口归档在 [docs/issues](./issues/)。进度与发布状态从 [PROGRESS.md](./PROGRESS.md) 进入。每条 Issue 记录 P 级、源码或实跑证据、影响与关闭断言，并关联原 Epic。链路一从 [ISSUE-001](./issues/ISSUE-001-chain1-user-reservation.md) 进入，最新实跑记录见 [终版复验回执](./issues/ISSUE-007-chain1-acceptance-evidence.md#2026-11-20-终版复验回执issue-008--issue-010-闭环)。
 
 [四条票务链路优化评审](./reviews/chain-optimization-review.md)记录预约、开售、下单、履约的交接建议，供各阶段的规格评审使用。
+
+[StarShow 买家端前端开发规格](./frontend/FRONTEND_DEVELOPMENT_SPEC.md)是 Phase 6 的评审稿，记录页面层级、交互状态、接口依赖和验收方式。

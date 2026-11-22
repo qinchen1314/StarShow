@@ -23,4 +23,9 @@ public class OrderStatusVO {
     private boolean retryable;
     private Long pollIntervalMs;
     private OffsetDateTime expireTime;
+    private OffsetDateTime serverTime;
+    private OffsetDateTime paymentCreateDeadline;
+    private String nextAction;
+    private Long retryAfterMs;
+    private boolean canStartNew;
 }

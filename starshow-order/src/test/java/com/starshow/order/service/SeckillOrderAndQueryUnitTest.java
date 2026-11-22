@@ -4,11 +4,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.starshow.api.dto.TierSnapshotDTO;
 import com.starshow.api.facade.ShowReadFacade;
 import com.starshow.api.facade.UserFacade;
+import com.starshow.common.auth.LoginUser;
+import com.starshow.common.auth.UserContext;
+import com.starshow.common.config.JacksonLongToStringConfig;
 import com.starshow.common.exception.BizException;
 import com.starshow.common.id.GeneSnowflakeIdGenerator;
 import com.starshow.common.result.ErrorCode;
 import com.starshow.order.config.OrderMetrics;
 import com.starshow.order.config.SeckillProperties;
+import com.starshow.order.controller.OrderController;
+import com.starshow.order.controller.SeckillController;
 import com.starshow.order.domain.entity.OrderDO;
 import com.starshow.order.dto.SeckillOrderRequest;
 import com.starshow.order.lua.OrderRedisScripts;
@@ -22,6 +27,10 @@ import org.apache.rocketmq.spring.core.RocketMQLocalTransactionState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,6 +40,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class SeckillOrderAndQueryUnitTest {
 
@@ -51,6 +63,8 @@ class SeckillOrderAndQueryUnitTest {
         orderShardMapper = mock(OrderShardMapper.class);
         orderActionMapper = mock(OrderActionMapper.class);
         redisScripts = mock(OrderRedisScripts.class);
+        when(redisScripts.readCurrentRequestOrderNo(anyLong(), anyLong())).thenReturn(null);
+        when(redisScripts.readBoughtOwnerOrderNo(anyLong(), anyLong())).thenReturn(null);
         idGenerator = new GeneSnowflakeIdGenerator(3L);
         properties = new SeckillProperties();
         properties.setStrategy("V4");
@@ -67,7 +81,8 @@ class SeckillOrderAndQueryUnitTest {
                 properties,
                 List.of(mockV4)
         );
-        queryService = new OrderQueryService(orderShardMapper, orderActionMapper, redisScripts, properties);
+        queryService = new OrderQueryService(orderShardMapper, orderActionMapper, redisScripts, properties,
+                new OrderConfirmation(30));
     }
 
     @Test
@@ -198,6 +213,89 @@ class SeckillOrderAndQueryUnitTest {
         RocketMQLocalTransactionState state = listener.checkByShowAndOrder(10001L, 999L);
         assertEquals(RocketMQLocalTransactionState.UNKNOWN, state,
                 "Redis transient error during checkLocalTransaction must return UNKNOWN, never blind ROLLBACK");
+    }
+
+    @Test
+    void shouldExposeTheSameV4BindingByRequestAndAccountBeforeDeduction() throws Exception {
+        long userId = 5011L;
+        long showId = 10001L;
+        long orderNo = idGenerator.nextOrderId(userId);
+        String requestId = "recovery-before-deduct";
+        when(redisScripts.readRequestBinding(showId, userId, requestId)).thenReturn(
+                OrderRedisScripts.ExistingReqRecord.builder().orderNo(orderNo).strategy("V4").build());
+        when(redisScripts.readCurrentRequestOrderNo(showId, userId)).thenReturn(orderNo);
+        when(redisScripts.readAttempt(showId, orderNo)).thenReturn(
+                OrderRedisScripts.AttemptRecord.builder().userId(userId).strategy("V4").status("SUBMITTING").build());
+
+        var byRequest = queryService.getSeckillRequestStatus(userId, showId, requestId);
+        var byAccount = queryService.getCurrentShowOrder(userId, showId);
+        assertEquals("SUBMITTING", byRequest.status());
+        assertEquals("SUBMITTING", byAccount.getStatus());
+        assertEquals(orderNo, byRequest.orderNo());
+        assertEquals(orderNo, byAccount.getOrderNo());
+        assertFalse(byRequest.canStartNew());
+        assertFalse(byAccount.isCanStartNew());
+        assertNull(queryService.getSeckillRequestStatus(userId + 16, showId, requestId).orderNo());
+
+        BizException competing = assertThrows(BizException.class,
+                () -> orderService.placeOrder(userId, baseAutoReq("different-request", 168000L)));
+        assertEquals(ErrorCode.MQ_SEND_FAILED, competing.getErrorCode());
+        assertEquals(Long.toString(orderNo), ((Map<?, ?>) competing.getData()).get("orderNo"));
+        assertEquals("SUBMITTING", ((Map<?, ?>) competing.getData()).get("status"));
+
+        var jackson = Jackson2ObjectMapperBuilder.json();
+        new JacksonLongToStringConfig().longToStringCustomizer().customize(jackson);
+        var mvc = MockMvcBuilders.standaloneSetup(
+                        new SeckillController(null, orderService, queryService), new OrderController(queryService))
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(jackson.build()))
+                .build();
+        try {
+            UserContext.set(new LoginUser(userId, "recovery-fixture", Long.MAX_VALUE));
+            mvc.perform(get("/api/v1/seckill/requests/{clientRequestId}", requestId).param("showId", Long.toString(showId)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("SUBMITTING"))
+                    .andExpect(jsonPath("$.data.orderNo").isString())
+                    .andExpect(jsonPath("$.data.orderNo").value(Long.toString(orderNo)))
+                    .andExpect(jsonPath("$.data.nextAction").value("CHECK_ORDER"))
+                    .andExpect(jsonPath("$.data.serverTime").exists())
+                    .andExpect(jsonPath("$.data.paymentCreateDeadline").doesNotExist())
+                    .andExpect(jsonPath("$.data.canStartNew").value(false));
+            mvc.perform(get("/api/v1/orders/current").param("showId", Long.toString(showId)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.status").value("SUBMITTING"))
+                    .andExpect(jsonPath("$.data.orderNo").isString())
+                    .andExpect(jsonPath("$.data.orderNo").value(Long.toString(orderNo)))
+                    .andExpect(jsonPath("$.data.hasOrder").value(true))
+                    .andExpect(jsonPath("$.data.pollIntervalMs").value(Long.toString(properties.getPollInitialMs())))
+                    .andExpect(jsonPath("$.data.retryAfterMs").value(Long.toString(properties.getPollInitialMs())))
+                    .andExpect(jsonPath("$.data.nextAction").value("CHECK_ORDER"))
+                    .andExpect(jsonPath("$.data.paymentCreateDeadline").doesNotExist())
+                    .andExpect(jsonPath("$.data.canStartNew").value(false));
+        } finally {
+            UserContext.clear();
+        }
+    }
+
+    @Test
+    void shouldPreventNewAttemptWhenEvidenceIsUnavailable() {
+        long userId = 5012L;
+        long showId = 10001L;
+        assertEquals("NOT_FOUND", queryService.getCurrentShowOrder(userId, showId).getStatus());
+        assertTrue(queryService.getCurrentShowOrder(userId, showId).isCanStartNew());
+
+        when(redisScripts.readCurrentRequestOrderNo(showId, userId))
+                .thenThrow(new DataAccessResourceFailureException("connection unavailable"));
+        var current = queryService.getCurrentShowOrder(userId, showId);
+        assertEquals("UNKNOWN", current.getStatus());
+        assertFalse(current.isCanStartNew());
+        assertFalse(current.isRetryable());
+
+        when(orderShardMapper.selectByUserShowRequest(anyString(), eq(userId), eq(showId), anyString()))
+                .thenThrow(new DataAccessResourceFailureException("connection unavailable"));
+        var byRequest = queryService.getSeckillRequestStatus(userId, showId, "recovery-unavailable");
+        assertEquals("UNKNOWN", byRequest.status());
+        assertFalse(byRequest.canStartNew());
+        assertNull(byRequest.orderNo());
     }
 
     @Test

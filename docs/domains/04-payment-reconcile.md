@@ -70,6 +70,8 @@ sequenceDiagram
 
 1. `POST /api/v1/payments` 仅接收本人 `orderNo`。通过 `OrderPaymentFacade.getPayableOrder` 读取实际 `WAIT_PAY`、服务端订单金额和 `expire_time`。支付单按 DB 金额建。支付服务用 `t_payment_order.uk_order_no` 原子仲裁建单与关闭。建单命中已关闭行即拒绝，已有可支付行则复用原截止时间。无单时的关闭也会写入具有唯一订单号的 `CLOSED` 关闭标记，生成内部 `payNo`，该标记不当成用户可付款的支付单。Mock 扣款只允许已登记且未关闭的渠道记录。超时、关闭或退款中的订单返回可理解的下一步。
 2. `orderExpireTime = WAIT_PAY 落库时间 + 15 分钟`。`paymentExpireTime = min(支付单创建时刻 + 14 分 30 秒, orderExpireTime - 30 秒)`。进入最后 30 秒后不得新建支付单。已有支付单的查询仍返回当前状态，支付按钮只在实际支付截止前可用。前端用 `serverTime` 校准倒计时，回到页面重新读取服务端时间。
+
+订单续查接口的 `paymentCreateDeadline` 使用与支付服务相同的 `starshow.payment.close-guard-seconds` 配置，默认 30 秒。支付页先按原订单号查支付单，发现已有单即使用实际 `paymentExpireTime`。订单达到新建截止后返回 `CHECK_PAYMENT`，页面只复查原支付和订单状态。
 3. Mock 渠道采用独立渠道账本，扣款或退款提交与本站回调处理处于独立事务。以 `payNo`、`refundNo` 作商户请求键，渠道生成独立交易号和确认时间。已支付的相同请求仅返回原结果。演示故障只在隔离环境或已启用演练配置时开放，正常流程的超时和签名校验不因演练入口放宽。
    - 渠道初始化和关单按同一 `payNo` 仲裁。未初始化时也允许先记录渠道账 `CLOSED`，延迟初始化不得覆盖已存在的关闭记录。真实扣款只允许 `INIT` 且尚未过期的渠道记录 CAS 为 `SUCCESS`。订单服务只在拿到渠道已关闭、未扣款的明确凭证后确认关单。
 4. 回调以 Mock 配置签名密钥验证，采用 HMAC-SHA256 和恒定时间比较。使用 `X-Mock-Timestamp`（Unix 秒）和 `X-Mock-Signature`（小写十六进制）。签名输入依次为十进制时间戳 UTF-8 字节、单个 LF、原始 JSON 字节。首版允许 300 秒时钟偏差。延迟配送用当前发送时刻重签，支付发生时间仍取原渠道账。回调按渠道交易号和商户请求键去重，合法重复返回 `HTTP 200 / 00000`。验签、订单归属、金额或渠道对不上时，不推进资金和订单。

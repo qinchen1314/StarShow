@@ -50,4 +50,5 @@
 1. Phase 1（链路一）、Phase 2（链路二）与 Phase 3（链路三）均已全部实证通过，待用户确认后依次合并分支至 `main` 并打 `v0.2.0-chain1` / `v0.3.0-chain2` / `v0.4.0-chain3` Tag。
 2. Phase 4 的退款进程级断点已跑通。历史账本重建、真实支付渠道，以及主办方异常单人工处置入口仍待验证。
 3. Phase 5 单实例八轮基线已跑通。下一轮加入网关、多实例、热票档倾斜、放票回流以及开票前读流量，定位 V4 在途积压并补齐大屏实证。
-4. 对照[万人演唱会产品验收](./reviews/chain-optimization-review.md#八以万人体育馆演唱会验收产品2026-11-22)，先补逐票实名、现场验票和退票规则，再演练完整入场与售后。
+4. [ISSUE-012](./issues/ISSUE-012-seckill-request-recovery.md)在云端真实 MySQL、Redis、RocketMQ 通过聚合态链路三 7 项验收，包括 200 路竞争与两处 JVM 强杀，另有提交索引清理补验通过。分布式发行包 HTTP E2E 待复验。
+5. [ISSUE-013](./issues/ISSUE-013-order-confirmation-experience.md)已完成。云端通过受影响模块 86 项单测、串行复跑 ISSUE-012 共 7 项，以及 ISSUE-013 的 120 秒延迟落库和支付保护窗剧本。浏览器验收与脱敏页面样例见原单。后续测试按[总测试说明](./TESTING.md)在云端串行执行。

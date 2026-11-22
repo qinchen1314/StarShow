@@ -1,0 +1,159 @@
+:root {
+  color-scheme: light;
+  --page: #f8f7f3;
+  --surface: #fff;
+  --ink: #211f1c;
+  --ink-muted: #625d54;
+  --action: #184c43;
+  --action-hover: #123c34;
+  --action-ink: #fff;
+  --line: #ded9d0;
+  --control-line: #786f62;
+  --error: #8e3438;
+  --error-surface: #faebea;
+  --information: #245469;
+  --information-surface: #eaf2f6;
+  color: var(--ink);
+  background: var(--page);
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; font-size: 1rem; line-height: 1.55; }
+h1, h2, h3, p, dl, ul { margin: 0; }
+h1, h2, h3 { line-height: 1.25; overflow-wrap: anywhere; }
+h1 { font-size: clamp(1.75rem, 2.5vw, 2rem); font-weight: 650; }
+h2 { font-size: 1.25rem; font-weight: 650; }
+h3 { font-size: .875rem; font-weight: 600; color: var(--ink-muted); }
+.wrap { width: min(100% - 40px, 680px); margin-inline: auto; }
+.masthead { border-bottom: 1px solid var(--line); }
+.bar, .account, .actions, .section-heading { display: flex; align-items: center; gap: 12px; }
+.bar { min-height: 64px; justify-content: space-between; }
+.brand { color: var(--action); font-size: 1.125rem; font-weight: 700; white-space: nowrap; }
+.account { min-width: 0; justify-content: flex-end; }
+#account-name { overflow-wrap: anywhere; color: var(--ink-muted); font-size: .875rem; }
+#logout { flex-shrink: 0; }
+main { padding-block: clamp(32px, 5vw, 64px) 64px; }
+main:has(#order-view:not([hidden])) > h1 {
+  color: var(--ink-muted);
+  font-size: 1rem;
+}
+#workspace, .login-section { margin-top: 32px; }
+.login-section { max-width: 400px; }
+.section { padding-block: 24px; border-top: 1px solid var(--line); }
+.order { padding-block: 0 28px; }
+main:has(#order-view:not([hidden])) #workspace { margin-top: 20px; }
+.order h2 { font-size: clamp(1.75rem, 4vw, 2.25rem); }
+#order-message { margin-top: 8px; }
+.secondary-copy { margin-top: 8px; }
+#order-message, .secondary-copy, .summary dt { color: var(--ink-muted); }
+#order-message, .secondary-copy { max-width: 42ch; }
+.summary { margin-top: 24px; border-top: 1px solid var(--line); }
+.summary > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 8px 16px;
+  align-items: baseline;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.summary dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.amount-row dd { font-size: 1.5rem; font-weight: 650; }
+.countdown dd { color: var(--action); font-size: 1.5rem; font-weight: 650; }
+.actions { flex-wrap: wrap; }
+.order-actions { margin-top: 20px; }
+.order-actions:has(.primary:not([hidden])) #refresh {
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--action);
+  text-decoration: underline;
+  text-underline-offset: .22em;
+}
+.details .summary { margin-top: 16px; }
+.section-heading { justify-content: space-between; flex-wrap: wrap; }
+.recent { margin-top: 12px; }
+.order-list { padding: 0; list-style: none; }
+.order-list li { border-bottom: 1px solid var(--line); }
+.order-list li:not(:has(button)) { padding-block: 12px; color: var(--ink-muted); }
+.order-list button {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+  padding-inline: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--action);
+  overflow-wrap: anywhere;
+}
+.order-list button::after { content: '›'; font-size: 1.25em; }
+.order-list button:hover { text-decoration: underline; text-underline-offset: .2em; }
+.fields, .lookup-form, .purchase-fields { display: grid; gap: 16px; }
+.fields, .lookup-form { margin-top: 16px; }
+.purchase-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lookup-form { grid-template-columns: minmax(0, 240px) auto; justify-content: start; align-items: end; }
+label { display: grid; min-width: 0; gap: 6px; font-size: .875rem; font-weight: 600; }
+input, button {
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+input { width: 100%; font-size: 1rem; font-weight: 400; }
+button { cursor: pointer; font-weight: 600; transition: background-color 110ms ease, border-color 110ms ease; }
+button.primary { border-color: var(--action); background: var(--action); color: var(--action-ink); padding-inline: 20px; }
+button.primary:hover, button.primary:active { background: var(--action-hover); border-color: var(--action-hover); }
+button.secondary:hover, button.secondary:active { border-color: var(--action); }
+button.text-action {
+  padding-inline: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--action);
+  text-decoration: underline;
+  text-underline-offset: .22em;
+}
+button:disabled { opacity: .65; cursor: wait; }
+:focus-visible { outline: 3px solid var(--action); outline-offset: 3px; }
+summary {
+  display: list-item;
+  min-height: 44px;
+  padding-block: 10px;
+  cursor: pointer;
+  color: var(--action);
+}
+details[open] .purchase-fields { padding-block: 4px 8px; }
+.notice {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--information);
+  background: var(--information-surface);
+  color: var(--information);
+  overflow-wrap: anywhere;
+}
+.notice[data-error] { border-color: var(--error); background: var(--error-surface); color: var(--error); }
+.skip-link { position: absolute; top: 8px; left: 16px; padding: 8px 12px; background: var(--surface); color: var(--action); }
+.skip-link:not(:focus) { clip-path: inset(50%); }
+
+@media (max-width: 359px) {
+  .wrap { width: calc(100% - 32px); }
+  .purchase-fields, .lookup-form { grid-template-columns: 1fr; }
+  .lookup-form button { justify-self: start; }
+  .summary > div { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+}

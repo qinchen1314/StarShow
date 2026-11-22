@@ -24,5 +24,10 @@ public class CurrentShowOrderVO {
     private OffsetDateTime expireTime;
     private Long pollIntervalMs;
     private boolean retryable;
+    private boolean canStartNew;
     private String failCode;
+    private OffsetDateTime serverTime;
+    private OffsetDateTime paymentCreateDeadline;
+    private String nextAction;
+    private Long retryAfterMs;
 }

@@ -128,6 +128,10 @@ public final class RedisKeys {
         return "starshow:seckill:submit_pending:{" + showId + "}";
     }
 
+    public static String seckillCurrent(long showId, long userId) {
+        return "starshow:seckill:current:{" + showId + "}:" + userId;
+    }
+
     public static String boughtOwner(long showId) {
         return "starshow:bought_owner:{" + showId + "}";
     }

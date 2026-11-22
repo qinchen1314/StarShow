@@ -1,0 +1,43 @@
+{
+  "accepted": {
+    "httpStatus": 202,
+    "code": "00202",
+    "data": {
+      "status": "PENDING_CONFIRM",
+      "orderNo": "9007199254741009",
+      "showId": "10001",
+      "pollIntervalMs": "500"
+    }
+  },
+  "pending": {
+    "status": "PENDING_CONFIRM",
+    "orderNo": "9007199254741009",
+    "showId": "10001",
+    "nextAction": "CHECK_ORDER",
+    "serverTime": "2026-11-22T12:00:00+08:00",
+    "canStartNew": false,
+    "hasOrder": true,
+    "pollIntervalMs": "500",
+    "retryAfterMs": "500"
+  },
+  "payable": {
+    "status": "WAIT_PAY",
+    "orderNo": "9007199254741009",
+    "showId": "10001",
+    "nextAction": "PAY",
+    "serverTime": "2026-11-22T12:02:00+08:00",
+    "expireTime": "2026-11-22T12:17:00+08:00",
+    "paymentCreateDeadline": "2026-11-22T12:16:30+08:00",
+    "canStartNew": false
+  },
+  "paymentGuard": {
+    "status": "WAIT_PAY",
+    "orderNo": "9007199254741009",
+    "showId": "10001",
+    "nextAction": "CHECK_PAYMENT",
+    "serverTime": "2026-11-22T12:16:30+08:00",
+    "expireTime": "2026-11-22T12:17:00+08:00",
+    "paymentCreateDeadline": "2026-11-22T12:16:30+08:00",
+    "canStartNew": false
+  }
+}
