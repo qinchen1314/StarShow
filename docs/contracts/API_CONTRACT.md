@@ -50,8 +50,8 @@
 | --- | --- | --- | --- |
 | `GET /api/v1/shows` | 按城市与稳定时间游标（`show_time, id`）浏览演出摘要，游标强绑定筛选条件。 | 公开 | ✅ Phase 2 已验收 |
 | `GET /api/v1/shows/{showId}` | 返回权威开售时间、配置版本、座位模式、票档（`Long` 字符串序列化）和入口四态。静态元数据经 Caffeine L1（60s）+ Redis L2 逻辑过期 + 布隆防穿透与 30s 空值缓存。 | 公开 | ✅ Phase 2 已验收 |
-| `GET /api/v1/shows/{showId}/stock` | 返回票档余量、快照时间和状态。有效零余量返回 `200/SOLD_OUT`，在售期部分缺失标 `available=null/STOCK_UNAVAILABLE`，整体不可用返回 `503/B0201` + `Retry-After`。 | 公开 | ✅ Phase 2 已验收 |
-| `GET /api/v1/shows/{showId}/zones/{zoneId}/seats` | 返回分区布局版本、MSB 最高位优先位图解码结果与走道 `segmentId`；在售期位图缺失或异常返回 `503/B0201`。 | 公开 | ✅ Phase 2 已验收 |
+| `GET /api/v1/shows/{showId}/stock` | 返回 `saleConfigVersion`、`entryState`、`asOf`、`stale` 和各票档的 `available`、`stockState`。有效零余量返回 `200/SOLD_OUT`，在售期部分缺失标 `available=null/STOCK_UNAVAILABLE`，整体不可用返回 `503/B0201` + `Retry-After`。 | 公开 | ✅ Phase 2 已验收 |
+| `GET /api/v1/shows/{showId}/zones/{zoneId}/seats` | 返回 `layoutVersion`、`asOf`、MSB 最高位优先位图解码结果与走道 `segmentId`。在售期位图缺失或异常返回 `503/B0201` + `Retry-After`。 | 公开 | ✅ Phase 2 已验收 |
 | `POST /internal/shows/{showId}/preheat` | 按 `(showId, saleConfigVersion)` 幂等创建/查询预热任务，Fencing Token Lua 分批写入并全量回读校验后置 `READY`/`PREHEATED`，到 `saleStartTime` 毫秒级准点开放。 | 内部密钥（公网零路由） | ✅ Phase 2 已验收 |
 | `GET /internal/shows/{showId}/tiers/{tierId}/snapshot` | 返回用于下单校验的权威价格（分）、`saleConfigVersion`、`layoutVersion`、`maxTicketsPerOrder`、售卖窗口和座位模式。 | 内部密钥 | ✅ Phase 2 已验收 |
 | `GET /internal/shows/{showId}/zones/{zoneId}/seats/spec` | 返回分区物理座位列表、所属票档、排座号与走道连续段 `segmentId`（`distributed` 模式下供 `starshow-order` 自主选座与连座校验）。 | 内部密钥 | ✅ Phase 3 已验收 |

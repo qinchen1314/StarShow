@@ -1,7 +1,7 @@
 # Runs one live middleware suite against a disposable MySQL schema and empty Redis DB.
 param(
     [Parameter(Mandatory)]
-    [ValidateSet("Chain1", "Chain2", "Chain3", "Chain4", "Chain5")]
+    [ValidateSet("Chain1", "Chain2", "Chain3", "Chain4", "Chain5", "SeatStock")]
     [string]$Chain,
     [switch]$Distributed,
     [switch]$FromPhase2Schema,
@@ -32,7 +32,8 @@ function New-TestSecret() {
     return [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 }
 
-$database = "starshow_c" + $Chain.Substring(5) + "_" + [Guid]::NewGuid().ToString("N").Substring(0, 12)
+$suffix = [Guid]::NewGuid().ToString("N").Substring(0, 12)
+$database = if ($Chain -eq "SeatStock") { "starshow_seatstock_$suffix" } else { "starshow_c" + $Chain.Substring(5) + "_$suffix" }
 $created = $false
 $ownsRedis = $false
 Push-Location (Split-Path $PSScriptRoot -Parent)
@@ -114,7 +115,7 @@ try {
         "-Dsurefire.failIfNoSpecifiedTests=false", "-Dstarshow.live.enabled=true", "-DforkCount=1", "test")
     mvn @mavenArgs *> $log
     $result = $LASTEXITCODE
-    Select-String -Path $log -Pattern 'Tests run:|BUILD (SUCCESS|FAILURE)|[Ll][23].*(passed|PASS|oversell)|BENCH_(ENV|RESULT)|REFUND_CRASH_' | ForEach-Object Line
+    Select-String -Path $log -Pattern 'Tests run:|BUILD (SUCCESS|FAILURE)|[Ll][23].*(passed|PASS|oversell)|BENCH_(ENV|RESULT)|REFUND_CRASH_|ISSUE_014_' | ForEach-Object Line
     if ($result -ne 0) { throw "$Chain exited with status $result. See $log" }
     if ($Distributed) {
         & "$PSScriptRoot/verify-chain4-distributed.ps1" -MysqlContainer $MysqlContainer -RedisContainer $RedisContainer

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>演出选座 · 星演票务</title>
+  <link rel="stylesheet" href="seat-stock.css">
+  <script type="module" src="seat-stock.mjs"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap bar">
+      <span class="brand">星演票务</span>
+      <form id="lookup" class="lookup">
+        <label for="show-id">场次 ID</label>
+        <input id="show-id" name="showId" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required>
+        <button type="submit">查询</button>
+      </form>
+    </div>
+  </header>
+  <main class="wrap">
+    <h1 id="show-title">演出选座</h1>
+    <p id="lookup-status" role="status">输入场次 ID 查看余票与分区座位。</p>
+    <div id="picker" class="picker" hidden>
+      <section class="card map-panel" aria-labelledby="map-title">
+        <div class="section-head">
+          <h2 id="map-title">分区座位</h2>
+          <button id="refresh" type="button">刷新余票</button>
+        </div>
+        <div id="zones" class="zones" role="group" aria-label="选择分区"></div>
+        <div class="status-panel" aria-live="polite" aria-atomic="true">
+          <strong id="stock-state"></strong>
+          <p id="stock-hint"></p>
+          <p id="released" hidden></p>
+          <p id="conflict" hidden></p>
+        </div>
+        <div id="layout" hidden>
+          <div class="stage">舞台</div>
+          <ul class="legend" aria-label="座位状态图例">
+            <li class="legend-free">可选</li>
+            <li class="legend-selected">已选</li>
+            <li class="legend-blocked">不可选</li>
+            <li class="legend-conflict">有冲突</li>
+          </ul>
+          <div class="map-scroll" tabindex="0" role="region" aria-label="座位图">
+            <div id="seat-rows" class="seat-rows"></div>
+          </div>
+        </div>
+      </section>
+      <aside class="card summary" aria-labelledby="selection-title">
+        <h2 id="selection-title">当前分区已选</h2>
+        <p id="selected" aria-live="polite">尚未选择座位</p>
+        <p id="selection-hint" hidden></p>
+        <button id="watch" type="button" aria-pressed="false">关注余票</button>
+        <div class="checkout">
+          <form id="sign-in" hidden>
+            <p>使用已实名账号登录后提交。</p>
+            <label>手机号<input name="phone" type="tel" autocomplete="username" required></label>
+            <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+            <button type="submit">登录</button>
+          </form>
+          <button id="submit-order" class="primary" type="button" hidden>提交所选座位</button>
+          <button id="check-order" type="button" hidden>查询本场订单</button>
+          <p id="order-status" role="status" hidden></p>
+        </div>
+      </aside>
+    </div>
+  </main>
+</body>
+</html>
