@@ -29,6 +29,8 @@ public class OrderRedisScripts {
     private final StringRedisTemplate redis;
     private final DefaultRedisScript<List> reqBindScript;
     private final DefaultRedisScript<Long> reqReleaseScript;
+    private final DefaultRedisScript<Long> reqStatusScript;
+    private final DefaultRedisScript<Long> submitExpireScript;
     private final DefaultRedisScript<Long> deductScript;
     private final DefaultRedisScript<List> seatDeductScript;
     private final DefaultRedisScript<Long> txCheckScript;
@@ -38,6 +40,8 @@ public class OrderRedisScripts {
         this.redis = stringRedisTemplate;
         this.reqBindScript = loadListScript("lua/seckill_req_bind.lua");
         this.reqReleaseScript = loadLongScript("lua/seckill_req_release.lua");
+        this.reqStatusScript = loadLongScript("lua/seckill_req_status.lua");
+        this.submitExpireScript = loadLongScript("lua/seckill_submit_expire.lua");
         this.deductScript = loadLongScript("lua/seckill_deduct.lua");
         this.seatDeductScript = loadListScript("lua/seckill_seat_deduct.lua");
         this.txCheckScript = loadLongScript("lua/seckill_tx_check.lua");
@@ -67,12 +71,15 @@ public class OrderRedisScripts {
     @SuppressWarnings("unchecked")
     public ReqBindResult bindRequest(long showId, long userId, String clientRequestId, long candidateOrderNo,
                                      String fingerprint, long tierId, int qty, int expectedSaleConfigVersion,
-                                     String seckillToken, long nowEpochMs, long reqTtlSec, long leaseMs, String strategy) {
+                                     String seckillToken, long nowEpochMs, long reqTtlSec, long leaseMs, String strategy,
+                                     Long observedOrderNo) {
         List<String> keys = List.of(
                 RedisKeys.seckillReq(showId, userId, clientRequestId),
                 RedisKeys.seckillAttempt(showId, candidateOrderNo),
                 RedisKeys.seckillToken(userId, showId, seckillToken),
-                RedisKeys.seckillSubmitPending(showId)
+                RedisKeys.seckillSubmitPending(showId),
+                RedisKeys.seckillCurrent(showId, userId),
+                RedisKeys.seckillAttempt(showId, observedOrderNo == null ? candidateOrderNo : observedOrderNo)
         );
         List<Object> raw = redis.execute(
                 reqBindScript,
@@ -88,7 +95,8 @@ public class OrderRedisScripts {
                 String.valueOf(reqTtlSec),
                 String.valueOf(leaseMs),
                 strategy,
-                clientRequestId
+                clientRequestId,
+                observedOrderNo == null ? "" : observedOrderNo.toString()
         );
         if (raw == null || raw.size() < 5) {
             throw new IllegalStateException("seckill_req_bind.lua returned unexpected result: " + raw);
@@ -103,11 +111,19 @@ public class OrderRedisScripts {
 
     public void releaseRequestBinding(long showId, long userId, String clientRequestId, long orderNo,
                                       String failCode, boolean deleteReq, boolean retryable, long nowMs, long ttlSec) {
+        releaseRequestBinding(showId, userId, clientRequestId, orderNo, failCode, deleteReq, retryable, nowMs, ttlSec, null);
+    }
+
+    public void releaseRequestBinding(long showId, long userId, String clientRequestId, long orderNo,
+                                      String failCode, boolean deleteReq, boolean retryable, long nowMs, long ttlSec,
+                                      Long leaseVersion) {
         try {
             List<String> keys = List.of(
                     RedisKeys.seckillReq(showId, userId, clientRequestId),
                     RedisKeys.seckillAttempt(showId, orderNo),
-                    RedisKeys.seckillSubmitPending(showId)
+                    RedisKeys.seckillSubmitPending(showId),
+                    RedisKeys.seckillCurrent(showId, userId),
+                    RedisKeys.deductLog(showId, orderNo)
             );
             redis.execute(
                     reqReleaseScript,
@@ -117,7 +133,8 @@ public class OrderRedisScripts {
                     deleteReq ? "1" : "0",
                     retryable ? "1" : "0",
                     String.valueOf(nowMs),
-                    String.valueOf(ttlSec)
+                    String.valueOf(Math.max(60L, ttlSec)),
+                    leaseVersion == null ? "" : leaseVersion.toString()
             );
         } catch (Exception ex) {
             log.warn("Failed to release seckill req binding orderNo={}: {}", orderNo, ex.getMessage());
@@ -127,43 +144,32 @@ public class OrderRedisScripts {
     public void updateAttemptAndReqStatus(long showId, long userId, String clientRequestId, long orderNo,
                                           String status, String failCode, boolean retryable, long ttlSec) {
         try {
-            String nowStr = String.valueOf(System.currentTimeMillis());
-            String attemptKey = RedisKeys.seckillAttempt(showId, orderNo);
-            redis.opsForHash().putAll(attemptKey, Map.of(
-                    "orderNo", String.valueOf(orderNo),
-                    "userId", String.valueOf(userId),
-                    "showId", String.valueOf(showId),
-                    "status", status,
-                    "failCode", failCode == null ? "" : failCode,
-                    "retryable", retryable ? "1" : "0",
-                    "updatedAtMs", nowStr
-            ));
-            redis.expire(attemptKey, Duration.ofSeconds(Math.max(60L, ttlSec)));
-
-            if (clientRequestId != null && !clientRequestId.isBlank()) {
-                String reqKey = RedisKeys.seckillReq(showId, userId, clientRequestId);
-                if (Boolean.TRUE.equals(redis.hasKey(reqKey))) {
-                    redis.opsForHash().putAll(reqKey, Map.of(
-                            "status", status,
-                            "failCode", failCode == null ? "" : failCode,
-                            "updatedAtMs", nowStr
-                    ));
-                    redis.expire(reqKey, Duration.ofSeconds(Math.max(60L, ttlSec)));
-                }
-            }
-            if (!"SUBMITTING".equals(status)) {
-                redis.opsForZSet().remove(RedisKeys.seckillSubmitPending(showId), String.valueOf(orderNo));
-            }
+            writeRequestStatus(showId, userId, clientRequestId, orderNo, status, failCode, retryable, ttlSec);
         } catch (Exception ex) {
             log.warn("Failed to update attempt status orderNo={}, status={}: {}", orderNo, status, ex.getMessage());
         }
+    }
+
+    public void writeRequestStatus(long showId, long userId, String clientRequestId, long orderNo,
+                                   String status, String failCode, boolean retryable, long ttlSec) {
+        List<String> keys = List.of(RedisKeys.seckillAttempt(showId, orderNo),
+                RedisKeys.seckillReq(showId, userId, clientRequestId == null ? "" : clientRequestId.trim()),
+                RedisKeys.seckillCurrent(showId, userId), RedisKeys.seckillSubmitPending(showId));
+        redis.execute(reqStatusScript, keys, Long.toString(orderNo), Long.toString(userId), Long.toString(showId),
+                status, failCode == null ? "" : failCode, retryable ? "1" : "0", Long.toString(System.currentTimeMillis()),
+                Long.toString(Math.max(60L, ttlSec)));
     }
 
     // ---------- 第二段短 Lua：V4 原子预扣、原子回查与幂等回补 ----------
 
     public long executeAutoDeduct(long showId, long tierId, long userId, int qty, long orderNo,
                                   long nowEpochSec, long ttlSec, int expectedVersion, long nowEpochMs) {
-        List<String> keys = List.of(
+        return executeAutoDeduct(showId, tierId, userId, qty, orderNo, nowEpochSec, ttlSec, expectedVersion, nowEpochMs, null);
+    }
+
+    public long executeAutoDeduct(long showId, long tierId, long userId, int qty, long orderNo,
+                                  long nowEpochSec, long ttlSec, int expectedVersion, long nowEpochMs, Long leaseVersion) {
+        List<String> keys = new ArrayList<>(List.of(
                 RedisKeys.stock(showId, tierId),
                 RedisKeys.boughtUsers(showId),
                 RedisKeys.deductLog(showId, orderNo),
@@ -171,10 +177,8 @@ public class OrderRedisScripts {
                 RedisKeys.rollbackDone(showId, orderNo),
                 RedisKeys.showReady(showId),
                 RedisKeys.boughtOwner(showId)
-        );
-        Long res = redis.execute(
-                deductScript,
-                keys,
+        ));
+        List<String> args = new ArrayList<>(List.of(
                 String.valueOf(userId),
                 String.valueOf(qty),
                 String.valueOf(orderNo),
@@ -183,15 +187,17 @@ public class OrderRedisScripts {
                 String.valueOf(ttlSec),
                 String.valueOf(expectedVersion),
                 String.valueOf(nowEpochMs)
-        );
+        ));
+        appendLease(keys, args, showId, userId, leaseVersion);
+        Long res = redis.execute(deductScript, keys, args.toArray());
         return res == null ? -5L : res;
     }
 
     @SuppressWarnings("unchecked")
     public SeatDeductResult executeSeatDeduct(long showId, long tierId, String zoneId, long userId, long orderNo,
                                               List<Integer> seatIndices, long nowEpochSec, long ttlSec,
-                                              int expectedVersion, long nowEpochMs) {
-        List<String> keys = List.of(
+                                              int expectedVersion, long nowEpochMs, Long leaseVersion) {
+        List<String> keys = new ArrayList<>(List.of(
                 RedisKeys.stock(showId, tierId),
                 RedisKeys.boughtUsers(showId),
                 RedisKeys.deductLog(showId, orderNo),
@@ -200,8 +206,8 @@ public class OrderRedisScripts {
                 RedisKeys.showReady(showId),
                 RedisKeys.boughtOwner(showId),
                 RedisKeys.seatBitmap(showId, zoneId)
-        );
-        List<String> args = new ArrayList<>(8 + seatIndices.size());
+        ));
+        List<String> args = new ArrayList<>(9 + seatIndices.size());
         args.add(String.valueOf(userId));
         args.add(String.valueOf(orderNo));
         args.add(String.valueOf(tierId));
@@ -210,6 +216,7 @@ public class OrderRedisScripts {
         args.add(String.valueOf(ttlSec));
         args.add(String.valueOf(expectedVersion));
         args.add(String.valueOf(nowEpochMs));
+        appendLease(keys, args, showId, userId, leaseVersion);
         for (Integer idx : seatIndices) {
             args.add(String.valueOf(idx));
         }
@@ -230,6 +237,13 @@ public class OrderRedisScripts {
             }
         }
         return new SeatDeductResult(code, conflicts);
+    }
+
+    private void appendLease(List<String> keys, List<String> args, long showId, long userId, Long leaseVersion) {
+        if (leaseVersion != null) {
+            keys.add(RedisKeys.seckillCurrent(showId, userId));
+            args.add(leaseVersion.toString());
+        }
     }
 
     /**
@@ -302,6 +316,31 @@ public class OrderRedisScripts {
                 .build();
     }
 
+    public Long readCurrentRequestOrderNo(long showId, long userId) {
+        Object order = redis.opsForHash().get(RedisKeys.seckillCurrent(showId, userId), "orderNo");
+        return order == null ? null : Long.valueOf(asStr(order));
+    }
+
+    public Set<String> fetchPendingSubmissions(long showId, long cutoffMs, int offset, int limit) {
+        Set<String> members = redis.opsForZSet().rangeByScore(
+                RedisKeys.seckillSubmitPending(showId), Double.NEGATIVE_INFINITY, cutoffMs, offset, limit);
+        return members == null ? Collections.emptySet() : members;
+    }
+
+    public long expireSubmission(long showId, long userId, long orderNo, long cutoffMs, long tombstoneTtl) {
+        String current = RedisKeys.seckillCurrent(showId, userId);
+        Object lease = redis.opsForHash().get(current, "leaseVersion");
+        List<String> keys = List.of(RedisKeys.seckillSubmitPending(showId), current,
+                RedisKeys.deductLog(showId, orderNo), RedisKeys.boughtOwner(showId),
+                RedisKeys.rollbackDone(showId, orderNo), RedisKeys.boughtUsers(showId));
+        Long result = redis.execute(submitExpireScript, keys, Long.toString(orderNo), Long.toString(userId),
+                lease == null ? "" : lease.toString(), Long.toString(cutoffMs), Long.toString(tombstoneTtl));
+        if (result == null) {
+            throw new IllegalStateException("seckill_submit_expire.lua returned null");
+        }
+        return result;
+    }
+
     public AttemptRecord readAttempt(long showId, long orderNo) {
         Map<Object, Object> entries = redis.opsForHash().entries(RedisKeys.seckillAttempt(showId, orderNo));
         if (entries == null || entries.isEmpty()) {
@@ -353,7 +392,11 @@ public class OrderRedisScripts {
 
     public Long readBoughtOwnerOrderNo(long showId, long userId) {
         Object val = redis.opsForHash().get(RedisKeys.boughtOwner(showId), String.valueOf(userId));
-        return parseLongOrNull(asStr(val));
+        return val == null ? null : Long.valueOf(asStr(val));
+    }
+
+    public boolean hasBoughtUser(long showId, long userId) {
+        return Boolean.TRUE.equals(redis.opsForSet().isMember(RedisKeys.boughtUsers(showId), Long.toString(userId)));
     }
 
     public ReadyGateSnapshot readReadyGate(long showId) {

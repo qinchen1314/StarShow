@@ -1,5 +1,6 @@
 package com.starshow.boot;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.starshow.api.event.OrderCreateEvent;
 import com.starshow.common.constant.RedisKeys;
 import com.starshow.common.exception.BizException;
@@ -19,6 +20,7 @@ import com.starshow.order.mq.OrderCreateConsumer;
 import com.starshow.order.mq.OrderCreateTransactionListener;
 import com.starshow.order.mq.OrderTimeoutDispatchScheduler;
 import com.starshow.order.mq.PendingDeductReconcileScheduler;
+import com.starshow.order.mq.PendingSubmissionReconcileScheduler;
 import com.starshow.order.service.OrderPersistenceService;
 import com.starshow.order.service.OrderQueryService;
 import com.starshow.order.service.SeckillOrderService;
@@ -41,6 +43,7 @@ import com.starshow.user.mapper.UserIdentityMapper;
 import org.apache.rocketmq.spring.core.RocketMQLocalTransactionState;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +52,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -117,10 +122,12 @@ class Chain3LiveMiddlewareVerificationTest {
     @Autowired private OrderCreateTransactionListener txListener;
     @Autowired private OrderTimeoutDispatchScheduler timeoutDispatchScheduler;
     @Autowired private PendingDeductReconcileScheduler reconcileScheduler;
+    @Autowired private PendingSubmissionReconcileScheduler submissionReconcileScheduler;
     @Autowired private GeneSnowflakeIdGenerator idGenerator;
     @Autowired private SeckillProperties seckillProperties;
     @Autowired private StringRedisTemplate stringRedisTemplate;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @TempDir private Path crashWorkspace;
 
     // -------------------------------------------------------------------------
     // 1. L2：V1 / V2 / V3 / V4 四策略分别实跑 200 并发抢 20 张票（零超卖、零重复单）
@@ -661,6 +668,184 @@ class Chain3LiveMiddlewareVerificationTest {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    @Test
+    void shouldRecoverV4BeforeDeductionUnderCompetingRequestsAndRejectLateSubmissions() throws Exception {
+        long showId = 93120L;
+        long tierId = 94120L;
+        long buyer = 861001L;
+        long expiredBuyer = 861002L;
+        long initialTime = System.currentTimeMillis() - 120_000L;
+        prepareAutoShow(showId, tierId, 2, 88000L, true);
+        ensureVerifiedUser(buyer);
+        ensureVerifiedUser(expiredBuyer);
+        String token = seckillTokenService.issueToken(buyer,
+                SeckillTokenRequest.builder().showId(showId).saleConfigVersion(1).build()).getSeckillToken();
+        String expiredBuyerToken = seckillTokenService.issueToken(expiredBuyer,
+                SeckillTokenRequest.builder().showId(showId).saleConfigVersion(1).build()).getSeckillToken();
+        String requestId = "recovery-bound-original";
+        SeckillOrderRequest request = SeckillOrderRequest.builder()
+                .showId(showId).tierId(tierId).qty(1).saleConfigVersion(1).expectedUnitPriceCent(88000L)
+                .seckillToken(token).clientRequestId(requestId).build();
+        String fingerprint = SeckillRequestFingerprint.compute(buyer, request);
+        long original = idGenerator.nextOrderId(buyer);
+        long abandoned = idGenerator.nextOrderId(expiredBuyer);
+
+        // 只执行第一段 Lua，停在工作进程尚未发送 Half 消息的边界。
+        assertEquals("BOUND", orderRedisScripts.bindRequest(showId, buyer, requestId, original, fingerprint,
+                tierId, 1, 1, token, initialTime, 1800, 1000, "V4", null).code());
+        assertEquals("BOUND", orderRedisScripts.bindRequest(showId, expiredBuyer, "recovery-abandoned", abandoned,
+                "abandoned-request-fingerprint", tierId, 1, 1, expiredBuyerToken,
+                initialTime, 1800, 1000, "V4", null).code());
+        assertEquals("SUBMITTING", orderQueryService.getSeckillRequestStatus(buyer, showId, requestId).status());
+        assertEquals(original, orderQueryService.getCurrentShowOrder(buyer, showId).getOrderNo());
+        assertNull(orderQueryService.getSeckillRequestStatus(expiredBuyer, showId, requestId).orderNo());
+
+        long renewalTime = initialTime + 30_000L;
+        assertEquals("TOKEN_INVALID", orderRedisScripts.bindRequest(showId, buyer, requestId, idGenerator.nextOrderId(buyer),
+                fingerprint, tierId, 1, 1, "expired-token", renewalTime, 1800, 1000, "V4", original).code());
+        AtomicInteger renewed = new AtomicInteger();
+        try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<OrderRedisScripts.ReqBindResult>> results = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                String id = i % 2 == 0 ? requestId : "recovery-competing-" + i;
+                results.add(workers.submit(() -> orderRedisScripts.bindRequest(showId, buyer, id,
+                        idGenerator.nextOrderId(buyer), fingerprint, tierId, 1, 1, token, renewalTime, 1800, 1000,
+                        "V4", requestId.equals(id) ? original : null)));
+            }
+            for (var result : results) {
+                OrderRedisScripts.ReqBindResult binding = result.get(10, TimeUnit.SECONDS);
+                assertEquals(original, binding.orderNo());
+                assertTrue(Set.of("CURRENT", "EXISTING").contains(binding.code()));
+                if (binding.leaseAcquired()) {
+                    renewed.incrementAndGet();
+                }
+            }
+        }
+        assertEquals(1, renewed.get());
+        assertEquals(2, zcard(RedisKeys.seckillSubmitPending(showId)));
+        assertEquals(1, submissionReconcileScheduler.reconcileShow(showId, initialTime + 2_000L));
+        assertEquals("FAILED", orderQueryService.getSeckillRequestStatus(expiredBuyer, showId, "recovery-abandoned").status());
+        assertTrue(orderQueryService.getCurrentShowOrder(expiredBuyer, showId).isCanStartNew());
+        long now = System.currentTimeMillis();
+        assertEquals(-3L, orderRedisScripts.executeAutoDeduct(showId, tierId, expiredBuyer, 1, abandoned,
+                now / 1000L, 86400, 1, now, abandoned));
+        assertEquals("2", stringRedisTemplate.opsForValue().get(RedisKeys.stock(showId, tierId)));
+
+        assertEquals(original, seckillOrderService.placeOrderWithStrategyOverride(buyer, request, "V4", false).getOrderNo());
+        waitUntil(15000L, () -> countActiveOrdersAcrossShards(showId) == 1);
+        assertEquals(original, orderQueryService.getCurrentShowOrder(buyer, showId).getOrderNo());
+        waitUntil(15000L, () -> zcard(RedisKeys.seckillSubmitPending(showId)) == 0);
+        assertEquals(1, sumActiveQtyAcrossShards(showId, tierId));
+        assertEquals(1, queryMaxActiveOrdersPerUser(showId));
+        assertEquals(1, orderInventoryMapper.selectTierStock(showId, tierId).getAvailableStock());
+        assertEquals("1", stringRedisTemplate.opsForValue().get(RedisKeys.stock(showId, tierId)));
+        assertEquals(original, orderRedisScripts.readBoughtOwnerOrderNo(showId, buyer));
+        OrderDO persisted = orderShardMapper.selectByOrderNo(OrderShardTableResolver.tableForOrderNo(original), original);
+        assertEquals("WAIT_PAY", persisted.getStatus());
+        assertEquals(88000L, persisted.getAmountCent());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM t_payment_order WHERE order_no IN (?, ?)", Integer.class, original, abandoned));
+
+        long nextOrder = idGenerator.nextOrderId(expiredBuyer);
+        String nextToken = seckillTokenService.issueToken(expiredBuyer,
+                SeckillTokenRequest.builder().showId(showId).saleConfigVersion(1).build()).getSeckillToken();
+        assertEquals("BOUND", orderRedisScripts.bindRequest(showId, expiredBuyer, "recovery-next-attempt", nextOrder,
+                "next-request-fingerprint", tierId, 1, 1, nextToken, System.currentTimeMillis(),
+                1800, 15000, "V4", null).code());
+        orderRedisScripts.writeRequestStatus(showId, expiredBuyer, "recovery-abandoned", abandoned,
+                "FAILED", ErrorCode.DEDUCT_REJECTED_BY_TOMBSTONE.getCode(), true, 1800);
+        String submitIndex = RedisKeys.seckillSubmitPending(showId);
+        stringRedisTemplate.opsForZSet().add(submitIndex, Long.toString(original), initialTime);
+        assertEquals(1, submissionReconcileScheduler.reconcileShow(showId, initialTime + 2_000L));
+        assertNull(stringRedisTemplate.opsForZSet().score(submitIndex, Long.toString(original)));
+        assertNotNull(stringRedisTemplate.opsForZSet().score(submitIndex, Long.toString(nextOrder)));
+        assertEquals(nextOrder, orderRedisScripts.readCurrentRequestOrderNo(showId, expiredBuyer));
+        assertEquals(1, orderInventoryMapper.selectTierStock(showId, tierId).getAvailableStock());
+        assertEquals("1", stringRedisTemplate.opsForValue().get(RedisKeys.stock(showId, tierId)));
+        log.info("SECKILL_RECOVERY_L2 competingCalls=200 leaseWinners=1 active=1 dbStock=1 redisStock=1 payments=0");
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "starshow.live.crash.enabled", matches = "true")
+    void shouldRecoverAfterWorkerIsKilledAtBindingAndBeforeMqCommit() throws Exception {
+        long showId = 93121L;
+        long tierId = 94121L;
+        long boundBuyer = 861003L;
+        long deductedBuyer = 861004L;
+        prepareAutoShow(showId, tierId, 2, 88000L, true);
+        ensureVerifiedUser(boundBuyer);
+        ensureVerifiedUser(deductedBuyer);
+
+        SeckillOrderRequest boundRequest = crashRequest(showId, tierId, boundBuyer, "crash-after-binding");
+        long boundOrder = killWorker(SeckillCrashWorker.Cut.BOUND, boundBuyer, boundRequest);
+        assertEquals(boundOrder, orderQueryService.getCurrentShowOrder(boundBuyer, showId).getOrderNo());
+        assertEquals("SUBMITTING", orderQueryService.getSeckillRequestStatus(
+                boundBuyer, showId, boundRequest.getClientRequestId()).status());
+        assertNull(orderRedisScripts.readDeductLog(showId, boundOrder));
+        assertEquals(0, countActiveOrdersAcrossShards(showId));
+        assertEquals("2", stringRedisTemplate.opsForValue().get(RedisKeys.stock(showId, tierId)));
+        Thread.sleep(1100L);
+        SeckillOrderRequest renewal = crashRequest(showId, tierId, boundBuyer, boundRequest.getClientRequestId());
+        assertEquals(boundOrder, seckillOrderService.placeOrderWithStrategyOverride(boundBuyer, renewal, "V4", false).getOrderNo());
+        waitUntil(15000L, () -> countActiveOrdersAcrossShards(showId) == 1);
+
+        SeckillOrderRequest deductedRequest = crashRequest(showId, tierId, deductedBuyer, "crash-before-mq-commit");
+        long deductedOrder = killWorker(SeckillCrashWorker.Cut.DEDUCTED, deductedBuyer, deductedRequest);
+        assertEquals(deductedOrder, orderQueryService.getCurrentShowOrder(deductedBuyer, showId).getOrderNo());
+        assertNotNull(orderRedisScripts.readDeductLog(showId, deductedOrder));
+        assertEquals("0", stringRedisTemplate.opsForValue().get(RedisKeys.stock(showId, tierId)));
+        waitUntil(75000L, () -> countActiveOrdersAcrossShards(showId) == 2);
+        assertEquals("WAIT_PAY", orderQueryService.getSeckillRequestStatus(
+                deductedBuyer, showId, deductedRequest.getClientRequestId()).status());
+        assertEquals(2, sumActiveQtyAcrossShards(showId, tierId));
+        assertEquals(1, queryMaxActiveOrdersPerUser(showId));
+        assertEquals(0, orderInventoryMapper.selectTierStock(showId, tierId).getAvailableStock());
+        waitUntil(15000L, () -> zcard(RedisKeys.seckillSubmitPending(showId)) == 0
+                && zcard(RedisKeys.deductPendingZset(showId)) == 0);
+        log.info("SECKILL_CRASH_RESULT boundOrder={} deductedOrder={} active=2 maxPerBuyer=1 dbStock=0 redisStock=0",
+                boundOrder, deductedOrder);
+    }
+
+    private SeckillOrderRequest crashRequest(long showId, long tierId, long buyer, String requestId) {
+        String token = seckillTokenService.issueToken(buyer,
+                SeckillTokenRequest.builder().showId(showId).saleConfigVersion(1).build()).getSeckillToken();
+        return SeckillOrderRequest.builder().showId(showId).tierId(tierId).qty(1).saleConfigVersion(1)
+                .expectedUnitPriceCent(88000L).clientRequestId(requestId).seckillToken(token).build();
+    }
+
+    private long killWorker(SeckillCrashWorker.Cut cut, long buyer, SeckillOrderRequest request) throws Exception {
+        Path marker = crashWorkspace.resolve(cut + ".ready");
+        Path requestFile = crashWorkspace.resolve(cut + ".json");
+        Path logFile = crashWorkspace.resolve(cut + ".log");
+        Path options = crashWorkspace.resolve(cut + ".args");
+        new ObjectMapper().writeValue(requestFile.toFile(), request);
+        String java = Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java").toString();
+        String classpath = System.getProperty("surefire.test.class.path", System.getProperty("java.class.path"));
+        Files.writeString(options, "-Xmx192m\n-cp\n\"" + classpath.replace("\\", "\\\\") + "\"\n");
+        Process process = new ProcessBuilder(java, "@" + options, SeckillCrashWorker.class.getName(),
+                cut.name(), marker.toString(), requestFile.toString(), Long.toString(buyer))
+                .redirectErrorStream(true).redirectOutput(logFile.toFile()).start();
+        try {
+            waitUntil(35000L, () -> {
+                assertTrue(process.isAlive(), () -> cut + " worker exited early; see " + logFile);
+                return Files.exists(marker) && Files.size(marker) > 0;
+            });
+            long orderNo = Long.parseLong(Files.readString(marker).trim());
+            process.destroyForcibly();
+            assertTrue(process.waitFor(15, TimeUnit.SECONDS), "Fault worker must exit");
+            assertNotEquals(0, process.exitValue(), "Fault worker must not shut down normally");
+            log.info("SECKILL_CRASH_CUT cut={} orderNo={} exit={}", cut, orderNo, process.exitValue());
+            return orderNo;
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                assertTrue(process.waitFor(15, TimeUnit.SECONDS));
+            }
+            Files.deleteIfExists(requestFile);
+        }
+    }
 
     private void prepareAutoShow(long showId, long tierId, int stock, long priceCent, boolean preheat) {
         cleanupShowData(showId, List.of(tierId), List.of("VIP_A"));

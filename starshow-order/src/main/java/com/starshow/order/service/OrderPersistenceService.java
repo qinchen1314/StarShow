@@ -307,7 +307,7 @@ public class OrderPersistenceService {
 
     /**
      * 供悬挂巡检调用：在独立事务中通过 CREATE_DECISION 唯一行锁抢占裁决权；
-     * 仅当订单确实不存在且 CREATE_DECISION 未被消费端置为 APPLIED 时，推进为 REJECTED 并写 RELEASE_STOCK 任务。
+     * 未落单则推进为 REJECTED。仅预扣巡检提供库存明细并创建 RELEASE_STOCK 任务。
      */
     public ReconcileDecisionOutcome tryRejectForPendingReconcile(long orderNo, long userId, long showId,
                                                                  String reasonCode, String payloadJson) {
@@ -328,14 +328,18 @@ public class OrderPersistenceService {
             }
 
             if (OrderActionDO.STATUS_REJECTED.equals(decision.getStatus())) {
-                ensureReleaseStockAction(orderNo, userId, showId, payloadJson, reasonCode, now);
+                if (payloadJson != null) {
+                    ensureReleaseStockAction(orderNo, userId, showId, payloadJson, reasonCode, now);
+                }
                 return ReconcileDecisionOutcome.REJECTED_SHOULD_ROLLBACK;
             }
 
             int updated = orderActionMapper.casUpdateStatus(orderNo, OrderActionDO.TYPE_CREATE_DECISION,
                     OrderActionDO.STATUS_PENDING, OrderActionDO.STATUS_REJECTED, payloadJson, reasonCode, now);
             if (updated == 1) {
-                ensureReleaseStockAction(orderNo, userId, showId, payloadJson, reasonCode, now);
+                if (payloadJson != null) {
+                    ensureReleaseStockAction(orderNo, userId, showId, payloadJson, reasonCode, now);
+                }
                 return ReconcileDecisionOutcome.REJECTED_SHOULD_ROLLBACK;
             }
             return ReconcileDecisionOutcome.CONFLICT_RETRY;

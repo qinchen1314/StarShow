@@ -10,6 +10,7 @@
 -- KEYS[5]: starshow:rollback_done:{showId}:<orderNo>  回补幂等/防悬挂墓碑
 -- KEYS[6]: starshow:show:ready:{showId}               链路二权威开售门禁 Hash
 -- KEYS[7]: starshow:bought_owner:{showId}             场次已购用户->订单号映射 Hash（换设备找回）
+-- KEYS[8]: starshow:seckill:current:{showId}:<userId> 当前提交租约
 --
 -- ARGV[1]: userId
 -- ARGV[2]: qty
@@ -19,6 +20,7 @@
 -- ARGV[6]: ttlSec (默认 86400)
 -- ARGV[7]: expectedSaleConfigVersion
 -- ARGV[8]: nowEpochMs
+-- ARGV[9]: leaseVersion（与 KEYS[8] 同时提供）
 --
 -- 返回码：
 --   1 : 扣减成功（或同 orderNo 幂等确认旧预扣）
@@ -36,6 +38,7 @@ local deductPendingKey = KEYS[4]
 local rollbackDoneKey = KEYS[5]
 local readyKey = KEYS[6]
 local boughtOwnerKey = KEYS[7]
+local currentKey = KEYS[8]
 
 local userId = ARGV[1]
 local qty = tonumber(ARGV[2])
@@ -64,6 +67,10 @@ end
 -- 2. 防悬挂墓碑校验
 if redis.call('EXISTS', rollbackDoneKey) == 1 then
     return -3
+end
+if currentKey and (redis.call('HGET', currentKey, 'orderNo') ~= orderNo
+    or redis.call('HGET', currentKey, 'leaseVersion') ~= ARGV[9]) then
+    return -7
 end
 
 -- 3. 链路二权威开售门禁校验（stage IN ('READY','OPEN') + version + [saleStartEpochMs, saleEndEpochMs)）
@@ -116,4 +123,7 @@ redis.call('HSET', deductLogKey,
 redis.call('EXPIRE', deductLogKey, ttlSec)
 redis.call('ZADD', deductPendingKey, nowEpochSec, orderNo)
 
+if currentKey then
+    redis.call('HSET', currentKey, 'status', 'PENDING_CONFIRM')
+end
 return 1

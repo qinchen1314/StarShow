@@ -13,7 +13,9 @@ import com.starshow.order.vo.CurrentShowOrderVO;
 import com.starshow.order.vo.OrderDetailVO;
 import com.starshow.order.vo.OrderListVO;
 import com.starshow.order.vo.OrderStatusVO;
+import com.starshow.order.vo.SeckillRequestStatusVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -50,7 +52,7 @@ public class OrderQueryService {
         String shardTable = OrderShardTableResolver.tableForOrderNo(orderNo);
         OrderDO order = orderShardMapper.selectByOrderNo(shardTable, orderNo);
         if (order != null) {
-            if (!order.getUserId().equals(userId)) {
+            if (!order.getUserId().equals(userId) || showId != null && !showId.equals(order.getShowId())) {
                 throw new BizException(ErrorCode.ORDER_NOT_FOUND);
             }
             return OrderStatusVO.builder()
@@ -112,12 +114,16 @@ public class OrderQueryService {
                     .build();
         }
         if (rollbackDone) {
+            boolean released = redisScripts.hasStockReleaseReceipt(showId, orderNo)
+                    || deductLog == null && !Long.valueOf(orderNo).equals(redisScripts.readBoughtOwnerOrderNo(showId, userId))
+                        && !redisScripts.hasBoughtUser(showId, userId);
             return OrderStatusVO.builder()
                     .orderNo(orderNo)
                     .showId(showId)
-                    .status("FAILED")
+                    .status(released ? "FAILED" : "PENDING_CONFIRM")
                     .failCode(ErrorCode.DEDUCT_REJECTED_BY_TOMBSTONE.getCode())
-                    .retryable(true)
+                    .retryable(released)
+                    .pollIntervalMs(released ? null : properties.getPollInitialMs())
                     .build();
         }
 
@@ -125,7 +131,8 @@ public class OrderQueryService {
         return OrderStatusVO.builder()
                 .orderNo(orderNo)
                 .showId(showId)
-                .status("PENDING_CONFIRM")
+                .status(attempt != null && "V4".equals(attempt.getStrategy()) && "SUBMITTING".equals(attempt.getStatus())
+                        ? "SUBMITTING" : "PENDING_CONFIRM")
                 .retryable(false)
                 .pollIntervalMs(properties.getPollInitialMs())
                 .build();
@@ -136,6 +143,19 @@ public class OrderQueryService {
      * 杀 App / 换设备跨设备恢复本人当前场次在途或有效订单
      */
     public CurrentShowOrderVO getCurrentShowOrder(long userId, long showId) {
+        try {
+            return findCurrentShowOrder(userId, showId);
+        } catch (DataAccessException | NumberFormatException ex) {
+            return unknownCurrent(showId);
+        } catch (BizException ex) {
+            if (ex.getErrorCode() != ErrorCode.ORDER_NOT_FOUND) {
+                throw ex;
+            }
+            return unknownCurrent(showId);
+        }
+    }
+
+    private CurrentShowOrderVO findCurrentShowOrder(long userId, long showId) {
         String shardTable = OrderShardTableResolver.tableForUserId(userId);
         OrderDO activeOrder = orderShardMapper.selectActiveByUserShow(shardTable, userId, showId);
         if (activeOrder != null) {
@@ -150,8 +170,11 @@ public class OrderQueryService {
                     .build();
         }
 
-        // DB 暂无有效单：查 Redis bought_owner:{showId} 找回本人 V4 在途单号
-        Long inFlightOrderNo = redisScripts.readBoughtOwnerOrderNo(showId, userId);
+        // 绑定阶段先查当前请求。已预扣的旧记录仍可通过 bought_owner 找回。
+        Long inFlightOrderNo = redisScripts.readCurrentRequestOrderNo(showId, userId);
+        if (inFlightOrderNo == null) {
+            inFlightOrderNo = redisScripts.readBoughtOwnerOrderNo(showId, userId);
+        }
         if (inFlightOrderNo != null) {
             OrderStatusVO status = getOrderStatus(userId, inFlightOrderNo, showId);
             return CurrentShowOrderVO.builder()
@@ -161,16 +184,60 @@ public class OrderQueryService {
                     .status(status.getStatus())
                     .expireTime(status.getExpireTime())
                     .pollIntervalMs(status.getPollIntervalMs())
-                    .retryable(status.isRetryable())
+                    .retryable(false)
                     .failCode(status.getFailCode())
                     .build();
+        }
+        if (redisScripts.hasBoughtUser(showId, userId)) {
+            return unknownCurrent(showId);
         }
 
         return CurrentShowOrderVO.builder()
                 .hasOrder(false)
                 .showId(showId)
+                .status("NOT_FOUND")
                 .retryable(true)
+                .canStartNew(true)
                 .build();
+    }
+
+    public SeckillRequestStatusVO getSeckillRequestStatus(long userId, long showId, String clientRequestId) {
+        try {
+            String requestId = clientRequestId.trim();
+            OrderDO order = orderShardMapper.selectByUserShowRequest(
+                    OrderShardTableResolver.tableForUserId(userId), userId, showId, requestId);
+            if (order != null) {
+                return requestStatus(userId, showId, order.getStatus(), order.getOrderNo(), null);
+            }
+            OrderRedisScripts.ExistingReqRecord binding = redisScripts.readRequestBinding(showId, userId, requestId);
+            if (binding != null && binding.getOrderNo() != null) {
+                OrderStatusVO orderStatus = getOrderStatus(userId, binding.getOrderNo(), showId);
+                return requestStatus(userId, showId, orderStatus.getStatus(), binding.getOrderNo(),
+                        orderStatus.getPollIntervalMs());
+            }
+        } catch (DataAccessException | NumberFormatException ex) {
+            return unknownRequest();
+        } catch (BizException ex) {
+            if (ex.getErrorCode() != ErrorCode.ORDER_NOT_FOUND) {
+                throw ex;
+            }
+        }
+        return unknownRequest();
+    }
+
+    private SeckillRequestStatusVO requestStatus(long userId, long showId, String status, Long orderNo, Long retryAfterMs) {
+        boolean terminal = "FAILED".equals(status) || "CLOSED".equals(status) || "REFUNDED".equals(status);
+        boolean canStartNew = terminal && getCurrentShowOrder(userId, showId).isCanStartNew();
+        return new SeckillRequestStatusVO(status, orderNo, canStartNew, retryAfterMs);
+    }
+
+    private CurrentShowOrderVO unknownCurrent(long showId) {
+        return CurrentShowOrderVO.builder().showId(showId).status("UNKNOWN")
+                .pollIntervalMs(properties.getPollInitialMs()).build();
+    }
+
+    private SeckillRequestStatusVO unknownRequest() {
+        return new SeckillRequestStatusVO("UNKNOWN", null, false, properties.getPollInitialMs());
     }
 
     /**

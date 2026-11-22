@@ -61,7 +61,8 @@ public class OrderCreateTransactionListener implements RocketMQLocalTransactionL
                         nowSec,
                         ttlSec,
                         expectedVersion,
-                        nowMs
+                        nowMs,
+                        ctx.getLeaseVersion()
                 );
                 code = res.code();
                 ctx.setConflictSeatIndices(res.conflictSeatIndices());
@@ -75,7 +76,8 @@ public class OrderCreateTransactionListener implements RocketMQLocalTransactionL
                         nowSec,
                         ttlSec,
                         expectedVersion,
-                        nowMs
+                        nowMs,
+                        ctx.getLeaseVersion()
                 );
             }
             ctx.setLuaCode(code);

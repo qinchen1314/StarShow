@@ -11,6 +11,7 @@
 -- KEYS[6]: starshow:show:ready:{showId}               链路二权威开售门禁 Hash
 -- KEYS[7]: starshow:bought_owner:{showId}             场次已购用户->订单号映射 Hash
 -- KEYS[8]: starshow:seat:bitmap:{showId}:<zoneId>     分区座位图 Bitmap
+-- KEYS[9]: starshow:seckill:current:{showId}:<userId> 当前提交租约
 --
 -- ARGV[1]: userId
 -- ARGV[2]: orderNo
@@ -20,7 +21,8 @@
 -- ARGV[6]: ttlSec
 -- ARGV[7]: expectedSaleConfigVersion
 -- ARGV[8]: nowEpochMs
--- ARGV[9..N]: 待锁定的 seatIndex 列表（0-based 互不重复非负整数）
+-- ARGV[9]: leaseVersion（与 KEYS[9] 同时提供）
+-- 后续参数为待锁定的 seatIndex 列表（0-based 互不重复非负整数）
 --
 -- 返回数组（首元素为状态码）：
 --   {1}                    : 锁座并扣减成功（或同 orderNo 幂等确认）
@@ -40,6 +42,7 @@ local rollbackDoneKey = KEYS[5]
 local readyKey = KEYS[6]
 local boughtOwnerKey = KEYS[7]
 local bitmapKey = KEYS[8]
+local currentKey = KEYS[9]
 
 local userId = ARGV[1]
 local orderNo = ARGV[2]
@@ -49,8 +52,9 @@ local nowEpochSec = tonumber(ARGV[5])
 local ttlSec = tonumber(ARGV[6])
 local expectedVersion = ARGV[7]
 local nowEpochMs = tonumber(ARGV[8])
+local firstSeat = currentKey and 10 or 9
 
-local seatCount = #ARGV - 8
+local seatCount = #ARGV - firstSeat + 1
 if seatCount <= 0 or (not nowEpochSec) or (not ttlSec) or (ttlSec <= 0) or (not nowEpochMs) then
     return {-1}
 end
@@ -59,7 +63,7 @@ end
 local seats = {}
 local seen = {}
 local seatsStr = ''
-for i = 9, #ARGV do
+for i = firstSeat, #ARGV do
     local idx = tonumber(ARGV[i])
     if (not idx) or (idx < 0) or (math.floor(idx) ~= idx) or seen[idx] then
         return {-1}
@@ -88,6 +92,10 @@ end
 -- 2. 防悬挂墓碑校验
 if redis.call('EXISTS', rollbackDoneKey) == 1 then
     return {-3}
+end
+if currentKey and (redis.call('HGET', currentKey, 'orderNo') ~= orderNo
+    or redis.call('HGET', currentKey, 'leaseVersion') ~= ARGV[9]) then
+    return {-7}
 end
 
 -- 3. 链路二权威开售门禁校验
@@ -161,4 +169,7 @@ redis.call('HSET', deductLogKey,
 redis.call('EXPIRE', deductLogKey, ttlSec)
 redis.call('ZADD', deductPendingKey, nowEpochSec, orderNo)
 
+if currentKey then
+    redis.call('HSET', currentKey, 'status', 'PENDING_CONFIRM')
+end
 return {1}

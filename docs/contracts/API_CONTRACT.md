@@ -61,10 +61,13 @@
 | --- | --- | --- | --- |
 | `POST /api/v1/seckill/token` | 签发绑定本人、场次与开售版本的短期凭证 `seckillToken`（支持同场次售罄/冲突后快速切换票档重试）。 | 实名 | ✅ Phase 3 已验收 |
 | `POST /api/v1/seckill/orders` | 用 `clientRequestId` 经 `seckill_req_bind.lua` 首请超时找回原单号，支持自动配座或自主选座。V1～V3 成功返回 `200`。V4 确认受理返回 `202` + `orderNo`。 | 实名 | ✅ Phase 3 已验收 |
-| `GET /api/v1/orders/{orderNo}/status` | 本人 V4 办理进度。尚未落单时带 `showId`。明确返回 `PENDING_CONFIRM`、`WAIT_PAY` 或已证实的 `FAILED`。已落单后返回实际订单状态。 | 登录 | ✅ Phase 3 已验收 |
-| `GET /api/v1/orders/current` | Query `showId`，凭登录态找回本人该场次当前在途或有效订单，解决换设备或杀 App 恢复。 | 登录 | ✅ Phase 3 已验收 |
+| `GET /api/v1/seckill/requests/{clientRequestId}` | Query `showId` 为正整数，请求号 8～36 字符。返回 `status, orderNo?, canStartNew, retryAfterMs?`。查无原请求或事实源暂不可用时返回 HTTP 200、`UNKNOWN`，且禁止据此起新单。 | 登录，仅本人 | ISSUE-012 聚合态已验 |
+| `GET /api/v1/orders/{orderNo}/status` | 尚未落单时带 `showId`。V4 绑定未预扣返回 `SUBMITTING`，预扣后待落库返回 `PENDING_CONFIRM`。已落单后返回实际订单状态。 | 登录，仅本人 | Phase 3 已验收，ISSUE-012 聚合态已验 |
+| `GET /api/v1/orders/current` | Query `showId` 为正整数。依次查本人有效订单、在途绑定和已购归属。证据暂不可用时返回 `UNKNOWN`，成功查询且无活动证据时返回 `NOT_FOUND`。保留 `hasOrder`，由 `canStartNew` 指示是否允许重新发起。 | 登录，仅本人 | Phase 3 已验收，ISSUE-012 聚合态已验 |
 | `GET /api/v1/orders/{orderNo}` | 按基因订单号单分片查询订单详情。资金结果由支付、退款查询返回。 | 登录 | ✅ Phase 3 已验收 |
 | `GET /api/v1/orders` | 查询当前用户订单列表（稳定游标分页，仅命中本人单个分片） | 登录 | ✅ Phase 3 已验收 |
+
+V4 客户端在换设备后可以用场次和登录态找回绑定中的原订单号。同号异参仍返回 `A0307`。同号续租需要当前有效的抢票 Token、原报价和配置版本。更换请求号遇到原请求仍在提交时，返回 HTTP `503/B0103`，数据中带原 `orderNo` 和 `SUBMITTING`。确认预扣后可只读找回原订单号，无需重新签发 Token。订单号和毫秒间隔中的 64 位值按全局配置序列化为十进制字符串。
 
 ### 链路四：支付、故障注入、退款与对账 (`starshow-payment`)
 | 方法与路径 | 说明 | 鉴权 | 状态 |

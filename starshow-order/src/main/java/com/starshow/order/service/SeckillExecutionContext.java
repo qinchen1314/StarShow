@@ -16,6 +16,7 @@ public class SeckillExecutionContext {
 
     private long userId;
     private long orderNo;
+    private Long leaseVersion;
     private SeckillOrderRequest request;
     private TierSnapshotDTO tier;
     private List<Integer> normalizedSeats;

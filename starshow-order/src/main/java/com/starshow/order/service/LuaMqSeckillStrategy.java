@@ -69,7 +69,7 @@ public class LuaMqSeckillStrategy implements SeckillStrategy {
                 .qty(ctx.getRequest().getQty())
                 .amountCent(ctx.getTotalAmountCent())
                 .deductEpochSec(nowSec)
-                .clientRequestId(ctx.getRequest().getClientRequestId())
+                .clientRequestId(ctx.getRequest().getClientRequestId().trim())
                 .requestFingerprint(ctx.getRequestFingerprint())
                 .saleConfigVersion(ctx.getAuthoritativeConfigVersion())
                 .layoutVersion(ctx.getAuthoritativeLayoutVersion())
@@ -79,6 +79,7 @@ public class LuaMqSeckillStrategy implements SeckillStrategy {
 
         OrderCreateTxContext txContext = OrderCreateTxContext.builder()
                 .event(event)
+                .leaseVersion(ctx.getLeaseVersion())
                 .manualSeat(ctx.isManualSeat())
                 .expectedSaleConfigVersion(ctx.getAuthoritativeConfigVersion())
                 .layoutVersion(ctx.getAuthoritativeLayoutVersion())
@@ -139,7 +140,7 @@ public class LuaMqSeckillStrategy implements SeckillStrategy {
         long showId = ctx.getRequest().getShowId();
         long userId = ctx.getUserId();
         long orderNo = ctx.getOrderNo();
-        String clientReqId = ctx.getRequest().getClientRequestId();
+        String clientReqId = ctx.getRequest().getClientRequestId().trim();
         long nowMs = System.currentTimeMillis();
         long reqTtl = properties.getRequestTtlSeconds();
 
@@ -149,14 +150,14 @@ public class LuaMqSeckillStrategy implements SeckillStrategy {
                 metrics.recordStockShortage();
                 // 售罄快速失败：释放未生效 req 绑定且保留 seckillToken，允许用户立刻换档重试
                 redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.STOCK_NOT_ENOUGH.getCode(), true, true, nowMs, reqTtl);
+                        ErrorCode.STOCK_NOT_ENOUGH.getCode(), false, true, nowMs, reqTtl, ctx.getLeaseVersion());
                 throw new BizException(ErrorCode.STOCK_NOT_ENOUGH);
             }
             case -4 -> {
                 metrics.recordSeatConflict();
                 // 座位冲突快速失败：释放未生效 req 绑定且保留 seckillToken，回传冲突偏移
                 redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.SEAT_CONFLICT.getCode(), true, true, nowMs, reqTtl);
+                        ErrorCode.SEAT_CONFLICT.getCode(), false, true, nowMs, reqTtl, ctx.getLeaseVersion());
                 throw BizException.withData(
                         ErrorCode.SEAT_CONFLICT,
                         ErrorCode.SEAT_CONFLICT.getMessage(),
@@ -171,29 +172,25 @@ public class LuaMqSeckillStrategy implements SeckillStrategy {
             case -2 -> {
                 metrics.recordDuplicateRejected();
                 redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.DUPLICATE_PURCHASE.getCode(), false, false, nowMs, reqTtl);
+                        ErrorCode.DUPLICATE_PURCHASE.getCode(), false, false, nowMs, reqTtl, ctx.getLeaseVersion());
                 throw new BizException(ErrorCode.DUPLICATE_PURCHASE);
             }
             case -3 -> {
                 redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.DEDUCT_REJECTED_BY_TOMBSTONE.getCode(), false, true, nowMs, reqTtl);
+                        ErrorCode.DEDUCT_REJECTED_BY_TOMBSTONE.getCode(), false, true, nowMs, reqTtl, ctx.getLeaseVersion());
                 throw new BizException(ErrorCode.DEDUCT_REJECTED_BY_TOMBSTONE);
             }
             case -5 -> {
                 redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.STOCK_UNAVAILABLE.getCode(), true, true, nowMs, reqTtl);
+                        ErrorCode.STOCK_UNAVAILABLE.getCode(), false, true, nowMs, reqTtl, ctx.getLeaseVersion());
                 throw BizException.serviceUnavailable(ErrorCode.STOCK_UNAVAILABLE, 1000L, "在售库存或座位热数据暂不可用，请稍后刷新");
             }
             case -6 -> {
                 redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.SHOW_NOT_ON_SALE.getCode(), true, true, nowMs, reqTtl);
+                        ErrorCode.SHOW_NOT_ON_SALE.getCode(), false, true, nowMs, reqTtl, ctx.getLeaseVersion());
                 throw resolveGateRejection(ctx);
             }
-            default -> {
-                redisScripts.releaseRequestBinding(showId, userId, clientReqId, orderNo,
-                        ErrorCode.STOCK_UNAVAILABLE.getCode(), true, true, nowMs, reqTtl);
-                throw BizException.serviceUnavailable(ErrorCode.STOCK_UNAVAILABLE, 1000L, "库存服务暂不可用，请稍后重试");
-            }
+            default -> throw buildSendUnknownException(ctx, "下单请求仍在确认，请凭原单号查询进度");
         }
     }
 

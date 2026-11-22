@@ -97,6 +97,10 @@ public class SeckillOrderService {
 
         // 2. 查 Redis 同请求绑定（若已存在且已受理/已落单，直接恢复原单号，不受后续 Token/票价/窗口影响）
         OrderRedisScripts.ExistingReqRecord existingReq = redisScripts.readRequestBinding(showId, userId, clientRequestId);
+        String configuredStrategy = (strategyOverride != null && !strategyOverride.isBlank())
+                ? strategyOverride.trim().toUpperCase()
+                : properties.normalizedStrategy();
+        boolean resumingV4 = existingReq != null && "V4".equals(existingReq.getStrategy());
         if (existingReq != null) {
             if (existingReq.getFingerprint() != null && !existingReq.getFingerprint().equals(fingerprint)) {
                 throw new BizException(ErrorCode.REQUEST_CONFLICT);
@@ -106,7 +110,11 @@ public class SeckillOrderService {
                 if (byOrderNo != null) {
                     return toOrderVOFromPersisted(byOrderNo);
                 }
-                if ("PENDING_CONFIRM".equals(existingReq.getStatus())) {
+                if ("FAILED".equals(existingReq.getStatus()) && resumingV4) {
+                    throw new BizException(resolveErrorCode(existingReq.getFailCode()));
+                }
+                if ("PENDING_CONFIRM".equals(existingReq.getStatus())
+                        || resumingV4 && redisScripts.readDeductLog(showId, existingReq.getOrderNo()) != null) {
                     return SeckillOrderVO.builder()
                             .orderNo(existingReq.getOrderNo())
                             .showId(showId)
@@ -117,6 +125,11 @@ public class SeckillOrderService {
                             .pollIntervalMs(properties.getPollInitialMs())
                             .build();
                 }
+            }
+        } else if ("V4".equals(configuredStrategy)) {
+            Long current = redisScripts.readCurrentRequestOrderNo(showId, userId);
+            if (current != null) {
+                return recoverCurrentBinding(userId, showId, current);
             }
         }
 
@@ -130,14 +143,14 @@ public class SeckillOrderService {
         }
 
         int authoritativeVersion = tier.effectiveSaleConfigVersion();
-        if (existingReq == null && request.getSaleConfigVersion() != authoritativeVersion) {
+        if ((existingReq == null || resumingV4) && request.getSaleConfigVersion() != authoritativeVersion) {
             throw new BizException(ErrorCode.SHOW_CONFIG_VERSION_CHANGED,
                     "开售配置版本已变更，当前权威版本=" + authoritativeVersion);
         }
 
         // 价格防篡改与变价提醒（A0308 + 当前权威价格）
         long unitPrice = tier.getPriceCent();
-        if (existingReq == null && !request.getExpectedUnitPriceCent().equals(unitPrice)) {
+        if ((existingReq == null || resumingV4) && !request.getExpectedUnitPriceCent().equals(unitPrice)) {
             Map<String, Object> priceData = new LinkedHashMap<>();
             priceData.put("showId", String.valueOf(showId));
             priceData.put("tierId", String.valueOf(tier.getTierId()));
@@ -170,16 +183,14 @@ public class SeckillOrderService {
         }
         List<Integer> normalizedSeats = seatSelectionValidator.validateAndNormalize(request, tier, zoneSpec);
 
-        String strategyName = (strategyOverride != null && !strategyOverride.isBlank())
-                ? strategyOverride.trim().toUpperCase()
-                : properties.normalizedStrategy();
+        String strategyName = resumingV4 ? "V4" : configuredStrategy;
         SeckillStrategy strategy = strategiesByName.get(strategyName);
         if (strategy == null) {
             throw new BizException(ErrorCode.SYSTEM_ERROR, "不支持的抢票策略: " + strategyName);
         }
 
         // 非 V4 策略额外做窗口状态校验（V4 门禁校验由第二段 Lua 原子兜底，此处也防未开售提前绑定）
-        if (existingReq == null) {
+        if (existingReq == null || resumingV4) {
             validateSaleWindowBeforeBind(tier, strategyName);
         }
 
@@ -199,13 +210,17 @@ public class SeckillOrderService {
                 nowMs,
                 Math.max(60L, properties.getRequestTtlSeconds()),
                 Math.max(1000L, properties.getRequestLeaseMs()),
-                strategyName
+                strategyName,
+                existingReq == null ? null : existingReq.getOrderNo()
         );
 
         switch (bind.code()) {
             case "CONFLICT" -> throw new BizException(ErrorCode.REQUEST_CONFLICT);
             case "TOKEN_INVALID" -> throw new BizException(ErrorCode.SECKILL_TOKEN_INVALID);
             case "VERSION_MISMATCH" -> throw new BizException(ErrorCode.SHOW_CONFIG_VERSION_CHANGED);
+            case "CURRENT" -> {
+                return recoverCurrentBinding(userId, showId, bind.orderNo());
+            }
             case "EXISTING" -> {
                 long winningOrderNo = bind.orderNo();
                 OrderDO recheck = orderShardMapper.selectByOrderNo(shardTable, winningOrderNo);
@@ -228,6 +243,9 @@ public class SeckillOrderService {
                     throw new BizException(resolveErrorCode(bind.failCode()));
                 }
                 if (!bind.leaseAcquired()) {
+                    if ("V4".equals(strategyName)) {
+                        throw submitting(showId, winningOrderNo);
+                    }
                     // 原请求仍在租约内执行中：不并发二次扣减，直接返回原单处理中
                     return SeckillOrderVO.builder()
                             .orderNo(winningOrderNo)
@@ -242,23 +260,53 @@ public class SeckillOrderService {
                 }
                 // 租约已到期，按唯一胜出原单号重新争取执行权
                 return executeStrategy(userId, winningOrderNo, request, tier, normalizedSeats,
-                        totalAmountCent, fingerprint, authoritativeVersion, manualSeat, strategy, simulateUnknownAfterDeduct);
+                        totalAmountCent, fingerprint, authoritativeVersion, manualSeat, strategy,
+                        simulateUnknownAfterDeduct, candidateOrderNo);
             }
             case "BOUND" -> {
                 return executeStrategy(userId, bind.orderNo(), request, tier, normalizedSeats,
-                        totalAmountCent, fingerprint, authoritativeVersion, manualSeat, strategy, simulateUnknownAfterDeduct);
+                        totalAmountCent, fingerprint, authoritativeVersion, manualSeat, strategy,
+                        simulateUnknownAfterDeduct, candidateOrderNo);
             }
             default -> throw new BizException(ErrorCode.SYSTEM_ERROR, "未知请求绑定状态: " + bind.code());
         }
     }
 
+    private SeckillOrderVO recoverCurrentBinding(long userId, long showId, long orderNo) {
+        OrderDO order = orderShardMapper.selectByOrderNo(OrderShardTableResolver.tableForUserId(userId), orderNo);
+        if (order != null && Long.valueOf(userId).equals(order.getUserId()) && Long.valueOf(showId).equals(order.getShowId())) {
+            return toOrderVOFromPersisted(order);
+        }
+        OrderRedisScripts.AttemptRecord attempt = redisScripts.readAttempt(showId, orderNo);
+        if (attempt != null && Long.valueOf(userId).equals(attempt.getUserId())) {
+            if ("FAILED".equals(attempt.getStatus())) {
+                throw new BizException(resolveErrorCode(attempt.getFailCode()));
+            }
+            if (redisScripts.readDeductLog(showId, orderNo) != null) {
+                return SeckillOrderVO.builder().orderNo(orderNo).showId(showId).tierId(attempt.getTierId())
+                        .qty(attempt.getQty()).strategy("V4").status("PENDING_CONFIRM")
+                        .pollIntervalMs(properties.getPollInitialMs()).build();
+            }
+        }
+        throw submitting(showId, orderNo);
+    }
+
+    private BizException submitting(long showId, long orderNo) {
+        return BizException.serviceUnavailableWithData(ErrorCode.MQ_SEND_FAILED, properties.getPollInitialMs(),
+                "原请求正在提交，请凭原单号查询", Map.of("showId", Long.toString(showId),
+                        "orderNo", Long.toString(orderNo), "status", "SUBMITTING",
+                        "pollIntervalMs", properties.getPollInitialMs()));
+    }
+
     private SeckillOrderVO executeStrategy(long userId, long orderNo, SeckillOrderRequest request,
                                            TierSnapshotDTO tier, List<Integer> normalizedSeats,
                                            long totalAmountCent, String fingerprint, int authoritativeVersion,
-                                           boolean manualSeat, SeckillStrategy strategy, boolean simulateUnknownAfterDeduct) {
+                                           boolean manualSeat, SeckillStrategy strategy, boolean simulateUnknownAfterDeduct,
+                                           long leaseVersion) {
         SeckillExecutionContext ctx = SeckillExecutionContext.builder()
                 .userId(userId)
                 .orderNo(orderNo)
+                .leaseVersion("V4".equals(strategy.name()) ? leaseVersion : null)
                 .request(request)
                 .tier(tier)
                 .normalizedSeats(normalizedSeats)

@@ -15,6 +15,7 @@ import java.util.List;
 public class OrderCreateTxContext {
 
     private OrderCreateEvent event;
+    private Long leaseVersion;
     private boolean manualSeat;
     private int expectedSaleConfigVersion;
     private String layoutVersion;

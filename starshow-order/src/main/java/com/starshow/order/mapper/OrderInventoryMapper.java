@@ -71,6 +71,9 @@ public interface OrderInventoryMapper {
     @Select("SELECT id FROM t_show WHERE deleted = 0 AND sale_status IN ('PREHEATED', 'ON_SALE', 'SOLD_OUT') ORDER BY id ASC")
     List<Long> selectActiveShowIdsForReconcile();
 
+    @Select("SELECT id FROM t_show WHERE id > #{afterId} ORDER BY id LIMIT #{limit}")
+    List<Long> selectShowIdsForSubmissionRecovery(@Param("afterId") long afterId, @Param("limit") int limit);
+
     @lombok.Data
     class TierStockRow {
         private Long id;

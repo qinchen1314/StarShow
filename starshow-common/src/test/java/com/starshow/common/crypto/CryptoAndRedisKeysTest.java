@@ -52,6 +52,7 @@ class CryptoAndRedisKeysTest {
                 RedisKeys.seckillReq(showId, 42L, "req-uuid-1"),
                 RedisKeys.seckillAttempt(showId, orderNo),
                 RedisKeys.seckillSubmitPending(showId),
+                RedisKeys.seckillCurrent(showId, 42L),
                 RedisKeys.boughtOwner(showId),
                 RedisKeys.seckillRateLimitShow(showId)
         );
